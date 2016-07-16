@@ -1,3 +1,3 @@
-# bt
+# leecher
 
-BitTorrent client in `rust`
+BitTorrent client built with `rust`
