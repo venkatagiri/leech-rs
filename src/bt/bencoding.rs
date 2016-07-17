@@ -18,31 +18,43 @@ pub enum BEncoding {
 impl fmt::Display for BEncoding {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
         match *self {
-            BEncoding::Int(value) => try!(write!(f, "{}", value)),
+            BEncoding::Int(value) => {
+                try!(write!(f, "{}", value))
+            },
             BEncoding::Str(ref value) => {
                 let result = String::from_utf8_lossy(value);
                 try!(write!(f, "{}", result))
             },
             BEncoding::List(ref list) => {
                 let mut start = true;
+                try!(write!(f, "["));
                 for value in list {
                     if start {
 	                    start = false;
                     } else {
-                        try!(write!(f, ","));
+                        try!(write!(f, ", "));
                     }
                     try!(write!(f, "{}", value));
                 }
+                try!(write!(f, "]"))
             },
             BEncoding::Dict(ref map) => {
+                let mut start = true;
+                try!(write!(f, "{{"));
                 for (key, value) in map {
-                    try!(write!(f, "key is {} ", key));
-                    if key == "pieces" {
-                        try!(write!(f, "value is REDACTED\n"));
+                    if start {
+	                    start = false;
                     } else {
-                        try!(write!(f, "value is [[{}]] \n", value));
+                        try!(write!(f, ", "));
+                    }
+                    try!(write!(f, "{} : ", key));
+                    if key == "pieces" {
+                        try!(write!(f, "REDACTED"));
+                    } else {
+                        try!(write!(f, "{}", value));
                     }
                 }
+                try!(write!(f, "}}"));
             },
         }
         Ok(())
