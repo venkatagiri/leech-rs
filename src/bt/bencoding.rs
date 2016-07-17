@@ -8,7 +8,6 @@ use std::iter::Peekable;
 use std::collections::HashMap;
 use std::cmp::PartialEq;
 
-#[derive(Eq)]
 pub enum BEncoding {
     Dict(HashMap<String, BEncoding>),
     List(Vec<BEncoding>),
