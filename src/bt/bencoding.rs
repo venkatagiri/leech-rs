@@ -5,11 +5,11 @@ use std::iter::Iterator;
 use std::str;
 use std::fmt;
 use std::iter::Peekable;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::cmp::PartialEq;
 
 pub enum BEncoding {
-    Dict(HashMap<String, BEncoding>),
+    Dict(BTreeMap<String, BEncoding>),
     List(Vec<BEncoding>),
     Int(i64),
     Str(Vec<u8>),
@@ -97,7 +97,7 @@ fn decode_list(mut iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
 fn decode_dict(mut iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
     iter.next();
 
-    let mut map = HashMap::new();
+    let mut map = BTreeMap::new();
 
     while let Ok(x) = *iter.peek().unwrap() {
         if x == TYPE_END {
