@@ -1,4 +1,4 @@
-use bt::bencoding::BEncoding;
+use bt::bencoding::*;
 use std::path::PathBuf;
 use std::fmt;
 
@@ -39,7 +39,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    pub fn new(file: &str) -> Result<Torrent, String> {
+    pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
         let data = BEncoding::decode_file(&file).unwrap();
         let comment = try!(data.get_dict_string("comment"));
         let tracker = try!(data.get_dict_string("announce"));

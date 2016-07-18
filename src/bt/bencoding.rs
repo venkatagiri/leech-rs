@@ -10,19 +10,21 @@ use std::cmp::PartialEq;
 
 #[derive(Debug)]
 pub enum BEncodingParseError {
-    Dict,
-    List,
-    Int,
-    Str,
+    NotADict,
+    NotAList,
+    NotAInt,
+    NotAStr,
+    MissingKey(String)
 }
 
 impl fmt::Display for BEncodingParseError {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
         match *self {
-            BEncodingParseError::Dict => try!(write!(f, "not an dict!")),
-            BEncodingParseError::List => try!(write!(f, "not an list!")),
-            BEncodingParseError::Int => try!(write!(f, "not an int!")),
-            BEncodingParseError::Str => try!(write!(f, "not an str!")),
+            BEncodingParseError::NotADict => try!(write!(f, "not a dict!")),
+            BEncodingParseError::NotAList => try!(write!(f, "not a list!")),
+            BEncodingParseError::NotAInt => try!(write!(f, "not an int!")),
+            BEncodingParseError::NotAStr => try!(write!(f, "not a str!")),
+            BEncodingParseError::MissingKey(ref val) => try!(write!(f, "missing key `{}`", val)),
         }
         Ok(())
     }
@@ -44,98 +46,74 @@ impl BEncoding {
 
     pub fn to_int(&self) -> Result<i64, BEncodingParseError> {
         match *self {
-            BEncoding::Int(x) => Ok(x),
-            _ => Err(BEncodingParseError::Int),
+            BEncoding::Int(val) => Ok(val),
+            _ => Err(BEncodingParseError::NotAInt),
         }
     }
 
     pub fn to_dict(&self) -> Result<&BTreeMap<String, BEncoding>, BEncodingParseError> {
         match *self {
-            BEncoding::Dict(ref x) => Ok(x),
-            _ => Err(BEncodingParseError::Dict),
+            BEncoding::Dict(ref map) => Ok(map),
+            _ => Err(BEncodingParseError::NotADict),
         }
     }
 
     pub fn to_list(&self) -> Result<&Vec<BEncoding>, BEncodingParseError> {
         match *self {
-            BEncoding::List(ref x) => Ok(x),
-            _ => Err(BEncodingParseError::List),
+            BEncoding::List(ref list) => Ok(list),
+            _ => Err(BEncodingParseError::NotAList),
         }
     }
 
     pub fn to_str(&self) -> Result<String, BEncodingParseError> {
         match *self {
-            BEncoding::Str(ref x) => Ok(str::from_utf8(x).unwrap().to_string()),
-            _ => Err(BEncodingParseError::Str),
+            BEncoding::Str(ref val) => Ok(str::from_utf8(val).unwrap().to_string()),
+            _ => Err(BEncodingParseError::NotAStr),
         }
     }
 
-    pub fn get_info_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
-        match self {
-            &BEncoding::Dict(ref map) => {
-                match map.get("info") {
-                    Some(&BEncoding::Dict(ref map)) => {
-                        match map.get(key) {
-                            Some(&BEncoding::Str(ref val)) => Ok(val.clone()),
-                            Some(_) => Err("torrent: info should be a dict!".to_string()),
-                            None => Err("torrent: info is missing!".to_string()),
-                        }
-                    }
-                    Some(_) => Err("torrent: info should be a dict!".to_string()),
-                    None => Err("torrent: info is missing!".to_string()),
-                }
-            },
-            _ => Err("torrent: root type in bencoding should be dictionary!".to_string()),
+    pub fn to_bytes(&self) -> Result<Vec<u8>, BEncodingParseError> {
+        match *self {
+            BEncoding::Str(ref val) => Ok(val.clone()),
+            _ => Err(BEncodingParseError::NotAStr),
         }
     }
 
-    pub fn get_hash_string(&self, map: &BTreeMap<String, BEncoding>, key: &str) -> Result<String, String> {
-        match map.get(key) {
-            Some(&BEncoding::Str(ref value)) => Ok(String::from_utf8_lossy(value).into_owned()),
-            Some(_) => Err("bencoding: map value should be a string!".to_string()),
-            None => Err(format!("bencoding: map does't have the required key ({})!", key).to_string()),
-        }
+    pub fn get_hash_string(&self, map: &BTreeMap<String, BEncoding>, key: &str) -> Result<String, BEncodingParseError> {
+        let value = try!(map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string())));
+        value.to_str()
     }
 
-    pub fn get_hash_int(&self, map: &BTreeMap<String, BEncoding>, key: &str) -> Result<i64, String> {
-        match map.get(key) {
-            Some(&BEncoding::Int(value)) => Ok(value),
-            Some(_) => Err("bencoding: map value should be a string!".to_string()),
-            None => Err(format!("bencoding: map does't have the required key ({})!", key).to_string()),
-        }
+    pub fn get_hash_int(&self, map: &BTreeMap<String, BEncoding>, key: &str) -> Result<i64, BEncodingParseError> {
+        let value = try!(map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string())));
+        value.to_int()
     }
 
-    pub fn get_dict_string(&self, key: &str) -> Result<String, String> {
-        match self {
-            &BEncoding::Dict(ref map) => self.get_hash_string(map, key),
-            _ => Err("bencoding: not a dictionary!".to_string()),
-        }
+    pub fn get_dict_string(&self, key: &str) -> Result<String, BEncodingParseError> {
+        let map = try!(self.to_dict());
+        self.get_hash_string(map, key)
     }
 
-    pub fn get_info_string(&self, key: &str) -> Result<String, String> {
-        match self {
-            &BEncoding::Dict(ref map) => {
-                match map.get("info") {
-                    Some(&BEncoding::Dict(ref map)) => self.get_hash_string(map, key),
-                    Some(_) => Err("torrent: info should be a dict!".to_string()),
-                    None => Err("torrent: info is missing!".to_string()),
-                }
-            },
-            _ => Err("torrent: root type in bencoding should be dictionary!".to_string()),
-        }
+    pub fn get_info_bytes(&self, key: &str) -> Result<Vec<u8>, BEncodingParseError> {
+        let map = try!(self.to_dict());
+        let info = try!(map.get("info").ok_or(BEncodingParseError::MissingKey("info".to_string())));
+        let info_map = try!(info.to_dict());
+        let value = try!(info_map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string())));
+        value.to_bytes()
     }
 
-    pub fn get_info_int(&self, key: &str) -> Result<i64, String> {
-        match self {
-            &BEncoding::Dict(ref map) => {
-                match map.get("info") {
-                    Some(&BEncoding::Dict(ref map)) => self.get_hash_int(map, key),
-                    Some(_) => Err("torrent: info should be a dict!".to_string()),
-                    None => Err("torrent: info is missing!".to_string()),
-                }
-            },
-            _ => Err("torrent: root type in bencoding should be dictionary!".to_string()),
-        }
+    pub fn get_info_string(&self, key: &str) -> Result<String, BEncodingParseError> {
+        let map = try!(self.to_dict());
+        let info = try!(map.get("info").ok_or(BEncodingParseError::MissingKey("info".to_string())));
+        let info_map = try!(info.to_dict());
+        self.get_hash_string(info_map, key)
+    }
+
+    pub fn get_info_int(&self, key: &str) -> Result<i64, BEncodingParseError> {
+        let map = try!(self.to_dict());
+        let info = try!(map.get("info").ok_or(BEncodingParseError::MissingKey("info".to_string())));
+        let info_map = try!(info.to_dict());
+        self.get_hash_int(info_map, key)
     }
 }
 
