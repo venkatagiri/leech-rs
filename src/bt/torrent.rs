@@ -1,4 +1,5 @@
 use bt::bencoding::*;
+use bt::tracker::*;
 use std::path::PathBuf;
 use std::fmt;
 
@@ -30,7 +31,7 @@ pub struct FileItem {
 /// Info parsed from a .torrent file
 pub struct Torrent {
     pub comment: String,
-    pub tracker: String,
+    pub tracker: Tracker,
     pub created_by: String,
     pub name: String,
     pub piece_length: i64,
@@ -42,7 +43,7 @@ impl Torrent {
     pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
         let data = BEncoding::decode_file(&file).unwrap();
         let comment = try!(data.get_dict_string("comment"));
-        let tracker = try!(data.get_dict_string("announce"));
+        let tracker = "http://tracker.trackerfix.com/announce".to_string(); //try!(data.get_dict_string("announce"));
         let created_by = try!(data.get_dict_string("created by"));
         let name = try!(data.get_info_string("name"));
         let piece_length = try!(data.get_info_int("piece length"));
@@ -82,13 +83,20 @@ impl Torrent {
 
         Ok(Torrent {
             comment: comment,
-            tracker: tracker,
+            tracker: Tracker(tracker),
             created_by: created_by,
             name: name,
             piece_length: piece_length,
             pieces_hashes: hashes,
             files: file_items
         })
+    }
+
+    pub fn start(&self) {
+        let peers = self.tracker.get_peers();
+        for peer in &peers {
+            println!("peer address is {}", peer);
+        }
     }
 }
 
