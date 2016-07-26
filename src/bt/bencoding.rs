@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
-use std::io::Bytes;
 use std::iter::Iterator;
+use std::slice::Iter;
 use std::str;
 use std::fmt;
 use std::iter::Peekable;
@@ -39,8 +39,14 @@ pub enum BEncoding {
 
 impl BEncoding {
     pub fn decode_file(file: &str) -> Option<BEncoding> {
-        let f = File::open(&file).unwrap();
-        let mut iter = f.bytes().peekable();
+        let mut f = File::open(&file).unwrap();
+        let mut buf = vec![];
+        f.read_to_end(&mut buf);
+        Self::decode(buf)
+    }
+
+    pub fn decode(buf: Vec<u8>) -> Option<BEncoding> {
+        let mut iter = buf.iter().peekable();
         decode_next_type(&mut iter)
     }
 
@@ -175,88 +181,71 @@ const LIST_START:u8 = b'l';
 const INT_START :u8 = b'i';
 const TYPE_END  :u8 = b'e';
 
-fn decode_int(iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
+fn decode_int(iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
     iter.next();
     let mut num = vec![];
-    while let Ok(x) = iter.next().unwrap() {
-        if x == TYPE_END {
-            break;
-        } else {
-            num.push(x);
-        }
+    while TYPE_END != **iter.peek().unwrap() {
+        num.push(*iter.next().unwrap());
     }
+    iter.next();
+
     if num.is_empty() {
         panic!("invalid integer");
     }
     Some(BEncoding::Int(str::from_utf8(&num).unwrap().parse::<i64>().unwrap()))
 }
 
-fn decode_list(mut iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
+fn decode_list(mut iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
     iter.next();
     let mut list = vec![];
-    while let Ok(x) = *iter.peek().unwrap() {
-        if x == TYPE_END {
-            iter.next();
-            break;
-        } else {
-            match decode_next_type(&mut iter) {
-                Some(x) => list.push(x),
-                None => panic!("list is invalid!"),
-            };
-        }
+    while TYPE_END != **iter.peek().unwrap() {
+        match decode_next_type(&mut iter) {
+            Some(x) => list.push(x),
+            None => panic!("list is invalid!"),
+        };
     }
+    iter.next();
     Some(BEncoding::List(list))
 }
 
-fn decode_dict(mut iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
+fn decode_dict(mut iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
     iter.next();
 
     let mut map = BTreeMap::new();
 
-    while let Ok(x) = *iter.peek().unwrap() {
-        if x == TYPE_END {
-            iter.next();
-            break;
-        } else {
-            let key = match decode_str(&mut iter) {
-                Some(BEncoding::Str(val)) => str::from_utf8(&val).unwrap().to_string(),
-                Some(_) => panic!("Can't have other types as key"),
-                None => panic!("Can't have other types as key"),
-            };
-            let value = decode_next_type(&mut iter).unwrap();
-            map.insert(key, value);
-        }
+    while TYPE_END != **iter.peek().unwrap() {
+        let key = match decode_str(&mut iter) {
+            Some(BEncoding::Str(val)) => str::from_utf8(&val).unwrap().to_string(),
+            Some(_) => panic!("Can't have other types as key"),
+            None => panic!("Can't have other types as key"),
+        };
+        let value = decode_next_type(&mut iter).unwrap();
+        map.insert(key, value);
     }
+    iter.next();
     Some(BEncoding::Dict(map))
 }
 
-fn decode_str(iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
+fn decode_str(iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
     let mut len = vec![];
-    while let Ok(x) = iter.next().unwrap() {
-        if x == b':' {
-            break;
-        } else {
-            len.push(x);
-        }
+    while b':' != **iter.peek().unwrap() {
+        len.push(*iter.next().unwrap());
     }
+    iter.next();
     let mut len = str::from_utf8(&len).unwrap().parse::<u64>().unwrap();
     let mut result = vec![];
     while len > 0 {
-        match iter.next().unwrap() {
-            Ok(x) => result.push(x),
-            Err(_) => panic!("file read failed!"),
-        }
+        result.push(*iter.next().unwrap());
         len-=1;
     }
     Some(BEncoding::Str(result))
 }
 
-fn decode_next_type(mut iter: &mut Peekable<Bytes<File>>) -> Option<BEncoding> {
-    match *iter.peek().unwrap() {
-        Ok(DICT_START) => decode_dict(&mut iter),
-        Ok(LIST_START) => decode_list(&mut iter),
-        Ok(INT_START) => decode_int(&mut iter),
-        Ok(_) => decode_str(&mut iter),
-        Err(_) => None,
+fn decode_next_type(mut iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
+    match **iter.peek().unwrap() {
+        DICT_START => decode_dict(&mut iter),
+        LIST_START => decode_list(&mut iter),
+        INT_START => decode_int(&mut iter),
+        _ => decode_str(&mut iter),
     }
 }
