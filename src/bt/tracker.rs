@@ -27,7 +27,7 @@ impl Tracker {
         };
         let benc = BEncoding::decode(buf).unwrap();
         let peers = benc.to_dict().unwrap().get("peers").unwrap().to_bytes().unwrap();
-        decode_peers(&peers, peers.len())
+        decode_peers(&peers)
     }
 }
 
@@ -37,15 +37,13 @@ impl fmt::Display for Tracker {
     }
 }
 
-fn decode_peers(bytes: &[u8], len: usize) -> Vec<SocketAddrV4>{
-    let no_of_peers = len / 6;
-    let mut peers = vec![];
-    for peer_no in 0..no_of_peers {
-        let start = peer_no * 6;
-        let ip = Ipv4Addr::new(bytes[start], bytes[start+1], bytes[start+2], bytes[start+3]);
-        let port = unsafe { mem::transmute::<[u8; 2], u16>([bytes[start+4], bytes[start+5]]) };
+fn decode_peers(peers: &[u8]) -> Vec<SocketAddrV4>{
+    let mut addresses = vec![];
+    for peer in peers.chunks(6) {
+        let ip = Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3]);
+        let port = unsafe { mem::transmute::<[u8; 2], u16>([peer[4], peer[5]]) };
         let addr = SocketAddrV4::new(ip, port);
-        peers.push(addr);
+        addresses.push(addr);
     }
-    peers
+    addresses
 }
