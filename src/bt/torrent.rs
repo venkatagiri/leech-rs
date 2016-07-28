@@ -43,6 +43,7 @@ impl Torrent {
     pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
         let data = BEncoding::decode_file(&file).unwrap();
         let comment = try!(data.get_dict_string("comment"));
+        // TODO: pick up http tracker from announce-list
         let tracker = "http://tracker.trackerfix.com/announce".to_string(); //try!(data.get_dict_string("announce"));
         let created_by = try!(data.get_dict_string("created by"));
         let name = try!(data.get_info_string("name"));
@@ -50,16 +51,11 @@ impl Torrent {
         let pieces = try!(data.get_info_bytes("pieces"));
 
         // Split the pieces into 20 byte sha1 hashes
-        let no_of_pieces = pieces.len()/20;
-        let mut hashes = vec![];
-
-        for x in 0..no_of_pieces {
-            let start = x * 20;
-            let end = (x+1) * 20;
-            let mut hash = Hash([0; 20]);
-            hash.0.clone_from_slice(&pieces[start..end]);
-            hashes.push(hash);
-        }
+        let hashes = pieces.chunks(20).map(|chunk| {
+            let mut h = Hash([0; 20]); // TODO: figure out simpler way to do this
+            h.0.clone_from_slice(chunk);
+            h
+        }).collect();
 
         // Parse files list from the info
         let map = data.to_dict().unwrap();
