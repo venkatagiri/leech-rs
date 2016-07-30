@@ -30,10 +30,8 @@ pub struct FileItem {
 
 /// Info parsed from a .torrent file
 pub struct Torrent {
-    pub comment: String,
-    pub tracker: Tracker,
-    pub created_by: String,
     pub name: String,
+    pub tracker: Tracker,
     pub piece_length: i64,
     pub pieces_hashes: Vec<Hash>,
     pub files: Vec<FileItem>,
@@ -42,11 +40,9 @@ pub struct Torrent {
 impl Torrent {
     pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
         let data = BEncoding::decode_file(&file).unwrap();
-        let comment = try!(data.get_dict_string("comment"));
-        // TODO: pick up http tracker from announce-list
-        let tracker = "http://tracker.trackerfix.com/announce".to_string(); //try!(data.get_dict_string("announce"));
-        let created_by = try!(data.get_dict_string("created by"));
         let name = try!(data.get_info_string("name"));
+        // TODO: pick up http tracker from announce-list
+        let tracker = try!(data.get_dict_string("announce"));
         let piece_length = try!(data.get_info_int("piece length"));
         let pieces = try!(data.get_info_bytes("pieces"));
 
@@ -60,28 +56,45 @@ impl Torrent {
         // Parse files list from the info
         let map = data.to_dict().unwrap();
         let info = map.get("info").unwrap().to_dict().unwrap();
-        let files = info.get("files").unwrap().to_list().unwrap();
         let mut file_items = vec![];
-        for file in files {
-            let f1 = file.to_dict().unwrap();
-            let len = f1.get("length").unwrap().to_int().unwrap();
-            let path = f1.get("path").unwrap().to_list().unwrap();
-            let mut file_path = PathBuf::from(".");
-            for part in path {
-                let p = part.to_str().unwrap();
-                file_path.push(p);
+        if let Some(files) = info.get("files") {
+            // Multiple File Mode
+            let file_list = files.to_list().unwrap();
+            let dir = name.clone();
+            for file in file_list {
+                let f1 = file.to_dict().unwrap();
+                let len = f1.get("length").unwrap().to_int().unwrap();
+                let path = f1.get("path").unwrap().to_list().unwrap();
+                let mut file_path = PathBuf::from("."); // TODO: change this to download directory
+                file_path.push(dir.clone());
+                for part in path {
+                    let p = part.to_str().unwrap();
+                    file_path.push(p);
+                }
+                file_items.push(FileItem {
+                    path: file_path.to_str().unwrap().into(),
+                    length: len,
+                });
             }
+        } else {
+            // Single File Mode
+            let file_length = try!(data.get_info_int("length"));
+            let file_name = name.clone();
+            let mut file_path = PathBuf::from(".");
+            file_path.push(file_name);
             file_items.push(FileItem {
                 path: file_path.to_str().unwrap().into(),
-                length: len,
+                length: file_length,
             });
         }
 
+        for file in &file_items {
+            println!("torrent: file is {}", file.path);
+        }
+
         Ok(Torrent {
-            comment: comment,
-            tracker: Tracker(tracker),
-            created_by: created_by,
             name: name,
+            tracker: Tracker(tracker),
             piece_length: piece_length,
             pieces_hashes: hashes,
             files: file_items
@@ -90,8 +103,12 @@ impl Torrent {
 
     pub fn start(&self) {
         let peers = self.tracker.get_peers();
+        if peers.is_empty() {
+            println!("torrent: no peers found!");
+            return;
+        }
         for peer in &peers {
-            println!("peer address is {}", peer);
+            println!("torrent: peer address is {}", peer);
         }
     }
 }
