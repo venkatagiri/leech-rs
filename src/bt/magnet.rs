@@ -6,7 +6,6 @@ pub struct Magnet {
 }
 
 impl Magnet {
-    #[allow(dead_code)]
     pub fn new(input: &str) -> Result<Magnet, &str> {
         if !input.starts_with("magnet:?") {
             return Err("Link should start with 'magnet:?'");

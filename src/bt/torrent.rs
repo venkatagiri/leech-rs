@@ -1,26 +1,8 @@
 use bt::bencoding::*;
 use bt::tracker::*;
+use bt::utils::*;
 use std::path::PathBuf;
-use std::fmt;
-
-/// Contains the SHA1 hash of the decoded value.
-#[derive(Default, Clone, Copy)]
-pub struct Hash(pub [u8; 20]);
-
-impl fmt::Display for Hash {
-    /// Prints the SHA1 hash as a string of hexadecimal digits.
-    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        static HEX_CHARS: &'static [u8; 16] = b"0123456789abcdef";
-        let mut buf = [0; 40];
-
-        for (i, &b) in self.0.iter().enumerate() {
-            buf[i * 2    ] = HEX_CHARS[(b >> 4) as usize];
-            buf[i * 2 + 1] = HEX_CHARS[(b & 0xf) as usize];
-        }
-
-        write!(f, "{}", String::from_utf8(buf.to_vec()).unwrap())
-    }
-}
+use rustc_serialize::hex::FromHex;
 
 /// Files in a Torrent
 pub struct FileItem {
@@ -45,6 +27,8 @@ impl Torrent {
         let tracker = try!(data.get_dict_string("announce"));
         let piece_length = try!(data.get_info_int("piece length"));
         let pieces = try!(data.get_info_bytes("pieces"));
+        // TODO: calculate info hash(sha1) from info dictionary
+        let info_hash = "3c71d81012ceec6adcf8c6009c92fde50878b9cf".from_hex().unwrap(); // TODO: use proper info_hash
 
         // Split the pieces into 20 byte sha1 hashes
         let hashes = pieces.chunks(20).map(|chunk| {
@@ -94,7 +78,7 @@ impl Torrent {
 
         Ok(Torrent {
             name: name,
-            tracker: Tracker(tracker),
+            tracker: Tracker{url: tracker, info_hash: Hash::from_vec(info_hash)},
             piece_length: piece_length,
             pieces_hashes: hashes,
             files: file_items
@@ -106,9 +90,6 @@ impl Torrent {
         if peers.is_empty() {
             println!("torrent: no peers found!");
             return;
-        }
-        for peer in &peers {
-            println!("torrent: peer address is {}", peer);
         }
     }
 }

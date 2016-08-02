@@ -170,7 +170,6 @@ impl fmt::Display for BEncoding {
 }
 
 impl PartialEq for BEncoding {
-    #[allow(unused_variables)]
     fn eq(&self, other: &Self) -> bool {
         true
     }
