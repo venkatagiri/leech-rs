@@ -16,7 +16,7 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    pub fn get_peers(&self) -> Vec<Peer>{
+    pub fn get_peers_addresses(&self) -> Vec<SocketAddrV4>{
         let client = Client::new();
         let url = format!("{tracker}?info_hash={hash}&peer_id={peer_id}&port=56789&uploaded=0&downloaded=0&left=0&event=started&compact=1",
                     tracker = self.url,
@@ -28,15 +28,15 @@ impl Tracker {
 
         let benc = BEncoding::decode(buf).unwrap();
         let peers = benc.to_dict().unwrap().get("peers").unwrap().to_bytes().unwrap();
-        self.create_peers(&peers)
+        self.parse_peers(&peers)
     }
 
-    fn create_peers(&self, peers: &[u8]) -> Vec<Peer>{
+    fn parse_peers(&self, peers: &[u8]) -> Vec<SocketAddrV4>{
         peers.chunks(6).filter_map(|peer| {
             let ip = Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3]);
             let port = unsafe { mem::transmute::<[u8; 2], u16>([peer[5], peer[4]]) };
-            if port != 56789 {
-              Some(Peer::new(SocketAddrV4::new(ip, port), self.info_hash))
+            if port != 56789 { //FIXME: check both your ip and port
+              Some(SocketAddrV4::new(ip, port))
             } else {
               None
             }

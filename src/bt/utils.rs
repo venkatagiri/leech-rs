@@ -10,9 +10,9 @@ impl Hash {
       self.0.to_hex().as_bytes().chunks(2).map(|h| format!("%{}{}", h[0] as char, h[1] as char) ).collect::<Vec<String>>().join("")
     }
 
-    pub fn from_vec(h: Vec<u8>) -> Hash {
+    pub fn from_vec(h: &Vec<u8>) -> Hash {
         let mut bhash: [u8; 20] = [0; 20];
-        bhash.copy_from_slice(&h);
+        bhash.copy_from_slice(h);
         Hash(bhash)
     }
 }
@@ -32,6 +32,6 @@ impl fmt::Display for Hash {
     }
 }
 
-// Peer ID used in messages (TODO: simpler init)
+// Peer ID used in messages (FIXME: simpler init)
 pub const MY_PEER_ID: Hash = Hash([b'3', b'1', b'4', b'1', b'5', b'9', b'2', b'6', b'5', b'3', b'5', b'8', b'9', b'7', b'9', b'3', b'2', b'3', b'8', b'4']);
 

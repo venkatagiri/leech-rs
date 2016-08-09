@@ -13,7 +13,7 @@ fn main() {
             return;
         },
     };
-    let torrent = match Torrent::new(&file) {
+    let mut torrent = match Torrent::new(&file) {
         Ok(val) => val,
         Err(err) => {
             println!("leecher: failure: {}", err);
