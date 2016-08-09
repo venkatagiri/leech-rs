@@ -1,10 +1,11 @@
-use hyper::client::Client;
 use std::io::Read;
 use std::fmt;
 use std::string::String;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::str::FromStr;
+use std::net::{IpAddr, SocketAddr};
 use std::mem;
 
+use hyper::client::Client;
 use bt::bencoding::*;
 use bt::peer::*;
 use bt::utils::*;
@@ -16,7 +17,7 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    pub fn get_peers_addresses(&self) -> Vec<SocketAddrV4>{
+    pub fn get_peers_addresses(&self) -> Vec<SocketAddr>{
         let client = Client::new();
         let url = format!("{tracker}?info_hash={hash}&peer_id={peer_id}&port=56789&uploaded=0&downloaded=0&left=0&event=started&compact=1",
                     tracker = self.url,
@@ -31,14 +32,15 @@ impl Tracker {
         self.parse_peers(&peers)
     }
 
-    fn parse_peers(&self, peers: &[u8]) -> Vec<SocketAddrV4>{
+    fn parse_peers(&self, peers: &[u8]) -> Vec<SocketAddr>{
         peers.chunks(6).filter_map(|peer| {
-            let ip = Ipv4Addr::new(peer[0], peer[1], peer[2], peer[3]);
+            let addr = format!("{}.{}.{}.{}", peer[0], peer[1], peer[2], peer[3]);
             let port = unsafe { mem::transmute::<[u8; 2], u16>([peer[5], peer[4]]) };
+            let ip = IpAddr::from_str(&addr).unwrap();
             if port != 56789 { //FIXME: check both your ip and port
-              Some(SocketAddrV4::new(ip, port))
+                Some(SocketAddr::new(ip, port))
             } else {
-              None
+                None
             }
         }).collect()
     }

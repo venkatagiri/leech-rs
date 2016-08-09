@@ -1,8 +1,10 @@
 use std::path::PathBuf;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::SocketAddr;
 use std::thread;
 
 use rustc_serialize::hex::FromHex;
+use mio::*;
+use mio::tcp::*;
 use bt::bencoding::*;
 use bt::tracker::*;
 use bt::utils::*;
@@ -23,7 +25,7 @@ pub struct Torrent {
     pub pieces_hashes: Vec<Hash>,
     pub files: Vec<FileItem>,
 
-    peer_addresses: Vec<SocketAddrV4>
+    peer_addresses: Vec<SocketAddr>,
 }
 
 impl Torrent {
@@ -99,28 +101,32 @@ impl Torrent {
         if self.peer_addresses.is_empty() {
             panic!("torrent: no peers found!");
         }
+        let add_peer_address_channel: Sender<_>;
         {
-            let peer_addresses = self.peer_addresses.clone();
-            let info_hash = self.info_hash.clone();
+            println!("torrent: creating event loop");
+            let address = "0.0.0.0:56789".parse::<SocketAddr>().unwrap();
+            let server_socket = TcpListener::bind(&address).unwrap();
+
+            let mut event_loop = EventLoop::new().unwrap();
+            add_peer_address_channel = event_loop.channel();
+            let mut handler = PeerHandler::new(server_socket, &self.info_hash);
+
+            event_loop.register(&handler.socket, SERVER_TOKEN, EventSet::readable(), PollOpt::edge()).unwrap();
+            event_loop.timeout_ms(TIMER_TOKEN, 5000).unwrap();
             thread::spawn(move || {
-                process_peers(&peer_addresses, &info_hash);
+                event_loop.run(&mut handler).unwrap();
             });
         }
+
+        let mut peers: Vec<Peer> = self.peer_addresses.iter().map(|addr| Peer::from_addr(addr, self.info_hash)).collect();
+        for peer in peers {
+            add_peer_address_channel.send(NotifyTypes::Peer(peer));
+        }
+        add_peer_address_channel.send(NotifyTypes::Action(MessageType::UnChoke));
         loop {
             println!("torrent: main loop");
             ::std::thread::sleep_ms(5000);
         }
-    }
-}
-
-fn process_peers(peer_addresses: &Vec<SocketAddrV4>, info_hash: &Hash) {
-    let mut peers: Vec<Peer> = peer_addresses.iter().map(|addr| Peer::new(*addr, *info_hash)).collect();
-    loop {
-        println!("torrent: process peers");
-        for mut peer in &mut peers {
-            peer.handle_read();
-        }
-        ::std::thread::sleep_ms(5000);
     }
 }
 

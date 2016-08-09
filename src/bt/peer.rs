@@ -1,13 +1,18 @@
 use std::io::prelude::*;
-use std::net::{SocketAddrV4, TcpStream};
+use std::net::SocketAddr;
 use std::fmt;
 use std::mem;
+use std::collections::HashMap;
 
 use rustc_serialize::hex::FromHex;
+use mio::*;
+use mio::tcp::*;
 
 use bt::utils::*;
 
-enum MessageType {
+// BitTorrent message types
+#[derive(Debug)]
+pub enum MessageType {
     Unknown = -3,
     Handshake = -2,
     KeepAlive = -1,
@@ -33,33 +38,136 @@ impl MessageType {
     }
 }
 
+// Notification types for the PeerHandler
+pub enum NotifyTypes {
+    Peer(Peer),
+    Action(MessageType)
+}
+
+// Handler for the event loop
+pub struct PeerHandler {
+    pub socket: TcpListener,
+    peers: HashMap<Token, Peer>,
+    token_counter: usize,
+    info_hash: Hash
+}
+
+pub const SERVER_TOKEN: Token = Token(0);
+pub const TIMER_TOKEN: Token = Token(1);
+
+impl PeerHandler {
+    pub fn new(socket: TcpListener, info_hash: &Hash) -> PeerHandler {
+        PeerHandler {
+            socket: socket,
+            peers: HashMap::new(),
+            token_counter: 100,
+            info_hash: info_hash.clone()
+        }
+    }
+}
+
+impl Handler for PeerHandler {
+    type Timeout = Token;
+    type Message = NotifyTypes;
+
+    fn ready(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token, events: EventSet) {
+        match token {
+            SERVER_TOKEN => {
+                let peer_socket = match self.socket.accept() {
+                    Ok(Some((sock, addr))) => sock,
+                    Ok(None) => unreachable!(),
+                    Err(e) => {
+                        println!("peer_server: accept error {}", e);
+                        return;
+                    }
+                };
+
+                let new_token = Token(self.token_counter);
+                self.peers.insert(new_token, Peer::new(peer_socket, self.info_hash.clone()));
+                self.token_counter += 1;
+
+                event_loop.register(&self.peers[&new_token].socket, new_token, EventSet::readable(), PollOpt::edge()).unwrap();
+            }
+            token => {
+                let mut peer = self.peers.get_mut(&token).unwrap();
+                peer.handle_read();
+            }
+        }
+    }
+
+    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
+        //println!("peer_handler: peer address is {}", msg);
+        println!("peer_handler: got a notification");
+        match msg {
+            NotifyTypes::Peer(peer) => {
+                let new_token = Token(self.token_counter);
+                self.peers.insert(new_token, peer);
+                self.token_counter += 1;
+                event_loop.register(&self.peers[&new_token].socket, new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
+            },
+            NotifyTypes::Action(message_type) => {
+                println!("peer_handler: message type is {:?}", message_type);
+            }
+        }
+    }
+
+    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timeout: Self::Timeout) {
+        println!("peer_handler: timeout occured: no of peers: {}", self.peers.len());
+        event_loop.timeout_ms(TIMER_TOKEN, 5000).unwrap();
+    }
+}
+
+// Talks to the clients through BitTorrent Protocol
 pub struct Peer {
-     stream: TcpStream,
+     socket: TcpStream,
      info_hash: Hash,
 
      data: Vec<u8>,
-     handshake_received: bool
+     handshake_received: bool,
+     handshake_sent: bool
 }
 
 impl Peer {
-    pub fn new(addr: SocketAddrV4, h: Hash) -> Peer {
-        println!("peer: connecting to {}", addr);
-        let s = TcpStream::connect(&addr).unwrap();
+    pub fn new(socket: TcpStream, h: Hash) -> Peer {
+        //println!("peer: connecting to {}", socket.peer_addr().unwrap());
         let mut peer = Peer{
-          stream: s,
+          socket: socket,
           info_hash: h,
           data: vec![],
-          handshake_received: false
+          handshake_received: false,
+          handshake_sent: false
         };
-        peer.send_handshake();
         peer
     }
 
+    pub fn from_addr(addr: &SocketAddr, h: Hash) -> Peer {
+        let socket = TcpStream::connect(addr).unwrap();
+        Self::new(socket, h)
+    }
+
     pub fn handle_read(&mut self) {
+        if !self.handshake_sent {
+            self.send_handshake();
+        }
+
         let mut buffer = [0; 1024];
-        let bytes_length = self.stream.read(&mut buffer).unwrap(); //FIXME: handle network errors
+        let bytes_length = match self.socket.try_read(&mut buffer) {
+            Err(e) => {
+                println!("Error while reading socket: {:?}", e); // FIXME: disconnect and remove peer
+                return;
+            },
+            Ok(None) => return, // Socket buffer has got no more bytes.
+            Ok(Some(len)) => {
+                len
+            }
+        };
         let mut incoming_message = buffer[0..bytes_length].to_vec();
         self.data.append(&mut incoming_message.to_vec());
+        println!("peer: bytes_length is {}", bytes_length);
+        if bytes_length == 0 {
+            println!("peer: returning");
+            return;
+        }
 
         loop {
             let message_length: usize = self.get_message_length(&self.data) as usize;
@@ -122,7 +230,8 @@ impl Peer {
         data.append(&mut self.info_hash.0.to_vec());
         data.append(&mut MY_PEER_ID.0.to_vec());
 
-        self.stream.write(&data);
+        self.socket.write(&data);
+        self.handshake_sent = true;
     }
 
     fn recv_handshake(&mut self, message: &Vec<u8>) {
@@ -142,6 +251,6 @@ impl Peer {
 
 impl fmt::Display for Peer {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.stream.peer_addr().unwrap())
+        write!(f, "{}", self.socket.peer_addr().unwrap())
     }
 }
