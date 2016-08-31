@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem;
 use rustc_serialize::hex::{FromHex, ToHex};
 
 /// Contains the SHA1 hash of the decoded value.
@@ -32,6 +33,15 @@ impl fmt::Display for Hash {
     }
 }
 
-// Peer ID used in messages (FIXME: simpler init)
-pub const MY_PEER_ID: Hash = Hash([b'3', b'1', b'4', b'1', b'5', b'9', b'2', b'6', b'5', b'3', b'5', b'8', b'9', b'7', b'9', b'3', b'2', b'3', b'8', b'4']);
+/// Transmutes u32 to byte slice
+pub fn usize_to_byte_vec(input: usize) -> Vec<u8> {
+    let mut data: [u8; 4] = unsafe { mem::transmute::<u32, [u8; 4]>(input as u32) };
+    data.reverse();
+    data.to_vec()
+}
 
+// Peer ID used in messages (FIXME: simpler init)
+pub const MY_PEER_ID: Hash = Hash([b'3', b'1', b'4', b'1', b'5', b'9', b'2', b'6', b'5', b'3', b'5', b'8', b'9', b'7', b'9', b'3', b'2', b'3', b'8', b'5']);
+
+/// Block size of each piece (2^14)
+pub const BLOCK_SIZE: usize = 16384;

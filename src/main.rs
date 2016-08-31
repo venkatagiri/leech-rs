@@ -3,7 +3,7 @@ extern crate rustc_serialize;
 extern crate mio;
 
 mod bt;
-use bt::torrent::Torrent;
+use bt::client::Client;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -14,12 +14,5 @@ fn main() {
             return;
         },
     };
-    let mut torrent = match Torrent::new(&file) {
-        Ok(val) => val,
-        Err(err) => {
-            println!("leecher: failure: {}", err);
-            return;
-        }
-    };
-    torrent.start();
+    Client::new(&file).start();
 }

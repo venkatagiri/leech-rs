@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::fmt;
 use std::mem;
 use std::collections::HashMap;
+use std::sync::mpsc;
 
 use rustc_serialize::hex::FromHex;
 use mio::*;
@@ -39,140 +40,153 @@ impl MessageType {
 }
 
 // Notification types for the PeerHandler
-pub enum NotifyTypes {
-    Peer(Peer),
-    Action(MessageType)
-}
-
-// Handler for the event loop
-pub struct PeerHandler {
-    pub socket: TcpListener,
-    peers: HashMap<Token, Peer>,
-    token_counter: usize,
-    info_hash: Hash,
+pub enum Actions {
+    AddPeer(SocketAddr),
+    SendData(SocketAddr, Vec<u8>),
+    //RecvPiece(usize, usize, Vec<u8>),
 }
 
 pub const SERVER_TOKEN: Token = Token(0);
 pub const TIMER_TOKEN: Token = Token(1);
 
+// Handler for the event loop
+pub struct PeerHandler {
+    pub socket: TcpListener,
+    streams: HashMap<Token, TcpStream>,
+    map_addr_to_token: HashMap<SocketAddr, Token>,
+    token_counter: usize,
+    data_channel: mpsc::Sender<(SocketAddr, Vec<u8>)>,
+}
+
 impl PeerHandler {
-    pub fn new(socket: TcpListener, info_hash: &Hash) -> PeerHandler {
+    pub fn new(socket: TcpListener, chn: mpsc::Sender<(SocketAddr, Vec<u8>)>) -> PeerHandler {
         PeerHandler {
             socket: socket,
-            peers: HashMap::new(),
+            streams: HashMap::new(),
+            map_addr_to_token: HashMap::new(),
             token_counter: 100,
-            info_hash: info_hash.clone(),
+            data_channel: chn,
         }
     }
 
-    pub fn add_peer(&mut self, event_loop: &mut EventLoop<PeerHandler>, peer: Peer) {
+    pub fn add_stream(&mut self, event_loop: &mut EventLoop<PeerHandler>, addr: SocketAddr, stream: TcpStream) {
         let new_token = Token(self.token_counter);
-        self.peers.insert(new_token, peer);
         self.token_counter += 1;
-        event_loop.register(&self.peers[&new_token].socket, new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
+        self.streams.insert(new_token, stream);
+        self.map_addr_to_token.insert(addr, new_token);
+        event_loop.register(&self.streams[&new_token], new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
     }
 }
 
 impl Handler for PeerHandler {
     type Timeout = Token;
-    type Message = NotifyTypes;
+    type Message = Actions;
 
     fn ready(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token, events: EventSet) {
-        match token {
-            SERVER_TOKEN => {
-                let peer_socket = match self.socket.accept() {
-                    Ok(Some((sock, addr))) => sock,
-                    Ok(None) => unreachable!(),
-                    Err(e) => {
-                        println!("peer_server: accept error {}", e);
-                        return;
-                    }
-                };
-                let hash = self.info_hash.clone();
-                self.add_peer(event_loop, Peer::new(peer_socket, hash));
+        if events.is_readable() {
+            println!("peer_handler: socket is readable for token {}", token.0);
+            match token {
+                SERVER_TOKEN => {
+                    println!("peer_handler: accepting a new connection");
+                    let (peer_socket, addr) = match self.socket.accept() {
+                        Ok(Some((sock, addr))) => (sock, addr),
+                        Ok(None) => unreachable!(),
+                        Err(e) => {
+                            println!("peer_server: accept error {}", e);
+                            return;
+                        }
+                    };
+                    self.add_stream(event_loop, addr, peer_socket);
+                }
+                token => {
+                    println!("peer_handler: received data for token {}", token.0);
+                    let socket = self.streams.get_mut(&token).unwrap();
+                    let mut buffer = [0; 2048];
+                    let bytes_length = socket.read(&mut buffer).unwrap();
+                    println!("peer_handler: got {} bytes of data for token {}", bytes_length, token.0);
+                    let data = buffer[0..bytes_length].to_vec();
+                    let addr = socket.peer_addr().unwrap();
+                    self.data_channel.send((addr, data));
+                }
             }
-            token => {
-                let mut peer = self.peers.get_mut(&token).unwrap();
-                peer.handle_read();
-            }
+        }
+
+        if events.is_writable() {
+            println!("peer_handler: socket is writable for token {}", token.0);
+            let socket = self.streams.get_mut(&token).unwrap();
+            let addr = socket.peer_addr().unwrap();
+            self.data_channel.send((addr, vec![]));
         }
     }
 
     fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
         match msg {
-            NotifyTypes::Peer(peer) => {
-                println!("peer_handler: adding a new peer");
-                self.add_peer(event_loop, peer);
+            Actions::AddPeer(addr) => {
+                println!("peer_handler: adding a new addr {}", addr);
+                let socket = TcpStream::connect(&addr).unwrap();
+                self.add_stream(event_loop, addr, socket);
             },
-            NotifyTypes::Action(message_type) => {
-                println!("peer_handler: message type is {:?}", message_type);
+            Actions::SendData(addr, data) => {
+                println!("peer_handler: actions: got data for addr {}", addr);
+                for (token, mut socket) in &mut self.streams {
+                    if socket.peer_addr().unwrap() == addr {
+                        let len = socket.write(&data).unwrap();
+                        println!("peer_handler: wrote {} bytes to {}", len , addr);
+                        break;
+                    }
+                }
             }
         }
-    }
-
-    fn timeout(&mut self, event_loop: &mut EventLoop<Self>, timeout: Self::Timeout) {
-        println!("peer_handler: timeout occured: no of peers: {}", self.peers.len());
-        event_loop.timeout_ms(TIMER_TOKEN, 5000).unwrap();
     }
 }
 
 // Talks to the clients through BitTorrent Protocol
+#[derive(Clone)]
 pub struct Peer {
-     socket: TcpStream,
-     info_hash: Hash,
+    addr: SocketAddr,
+    info_hash: Hash,
+    channel: Sender<Actions>,
+    tpieces: mpsc::Sender<(usize, usize, Vec<u8>)>,
 
-     data: Vec<u8>,
-     handshake_received: bool,
-     handshake_sent: bool
+    data: Vec<u8>,
+    pub is_handshake_received: bool,
+    pub is_handshake_sent: bool,
+    pub is_interested_sent: bool,
+    pub is_choke_received: bool,
+    pub blocks_requested: usize,
 }
 
 impl Peer {
-    pub fn new(socket: TcpStream, h: Hash) -> Peer {
-        //println!("peer: connecting to {}", socket.peer_addr().unwrap());
-        let mut peer = Peer{
-          socket: socket,
-          info_hash: h,
-          data: vec![],
-          handshake_received: false,
-          handshake_sent: false
+    pub fn new(addr: SocketAddr, h: Hash, chn: Sender<Actions>, t: mpsc::Sender<(usize, usize, Vec<u8>)>) -> Peer {
+        let mut p = Peer {
+            addr: addr,
+            info_hash: h,
+            channel: chn,
+            tpieces: t,
+            data: vec![],
+            is_handshake_received: false,
+            is_handshake_sent: false,
+            is_interested_sent: false,
+            is_choke_received: true,
+            blocks_requested: 0,
         };
-        peer
+        p.send_handshake();
+        p
     }
 
-    pub fn from_addr(addr: &SocketAddr, h: Hash) -> Peer {
-        let socket = TcpStream::connect(addr).unwrap();
-        Self::new(socket, h)
+    pub fn read(&mut self, mut data: Vec<u8>) {
+        self.data.append(&mut data);
     }
 
-    pub fn handle_read(&mut self) {
-        if !self.handshake_sent {
-            self.send_handshake();
-        }
+    fn write(&self, data: Vec<u8>) {
+        self.channel.send(Actions::SendData(self.addr, data));
+    }
 
-        let mut buffer = [0; 1024];
-        let bytes_length = match self.socket.try_read(&mut buffer) {
-            Err(e) => {
-                println!("Error while reading socket: {:?}", e); // FIXME: disconnect and remove peer
-                return;
-            },
-            Ok(None) => return, // Socket buffer has got no more bytes.
-            Ok(Some(len)) => {
-                len
-            }
-        };
-        let mut incoming_message = buffer[0..bytes_length].to_vec();
-        self.data.append(&mut incoming_message.to_vec());
-        println!("peer: bytes_length is {}", bytes_length);
-        if bytes_length == 0 {
-            println!("peer: returning");
-            return;
-        }
+    pub fn process_data(&mut self) {
+        //println!("peer: data(size={}) - {:?}", self.data.len(), self.data);
 
         loop {
             let message_length: usize = self.get_message_length(&self.data) as usize;
-            println!("peer: data size is {}", self.data.len());
-            println!("peer: data is {:?}", self.data);
-            println!("peer: message_length is {:?}", message_length);
             if self.data.len() < message_length {
                 break;
             }
@@ -186,13 +200,13 @@ impl Peer {
             MessageType::Handshake => self.recv_handshake(message), //FIXME: implement other types
             MessageType::KeepAlive => println!("peer: recv keepalive"),
             MessageType::Choke => println!("peer: recv choke"),
-            MessageType::UnChoke => println!("peer: recv unchoke"),
+            MessageType::UnChoke => self.recv_unchoke(message),
             MessageType::Interested => println!("peer: recv interested"),
             MessageType::UnInterested => println!("peer: recv uninterested"),
             MessageType::Have => println!("peer: recv have"),
             MessageType::Bitfield => println!("peer: recv bitfield"),
             MessageType::Request => println!("peer: recv request"),
-            MessageType::Piece => println!("peer: recv piece"),
+            MessageType::Piece => self.recv_piece(message),
             MessageType::Cancel => println!("peer: recv cancel"),
             MessageType::Port => println!("peer: recv port"),
             MessageType::Unknown => println!("peer: unknown message"),
@@ -200,7 +214,7 @@ impl Peer {
     }
 
     fn get_message_length(&self, data: &Vec<u8>) -> u32 {
-        if !self.handshake_received {
+        if !self.is_handshake_received {
             68
         } else if data.len() < 4 {
             u32::max_value()
@@ -210,7 +224,7 @@ impl Peer {
     }
 
     fn get_message_type(&self, message: &Vec<u8>) -> MessageType {
-        if !self.handshake_received {
+        if !self.is_handshake_received {
             MessageType::Handshake
         } else if message.len() == 4 { // FIXME: Check if message has only 0s
             MessageType::KeepAlive
@@ -222,15 +236,40 @@ impl Peer {
     fn send_handshake(&mut self) {
         println!("peer: send_handshake to {}", self);
         let mut data: Vec<u8> = vec![];
-        // <pstrlen><pstr><reserved><info_hash><peer_id>
         data.push(19);
         data.append(&mut b"BitTorrent protocol".to_vec());
         data.append(&mut [0; 8].to_vec());
         data.append(&mut self.info_hash.0.to_vec());
         data.append(&mut MY_PEER_ID.0.to_vec());
 
-        self.socket.write(&data);
-        self.handshake_sent = true;
+        self.write(data);
+        self.is_handshake_sent = true;
+    }
+
+    pub fn send_interested(&mut self) {
+        if self.is_interested_sent {
+            return;
+        }
+        println!("peer: send_interested to {}", self);
+        let mut data: Vec<u8> = vec![0, 0, 0, 1, 2];
+
+        self.write(data);
+        self.is_interested_sent = true;
+    }
+
+    pub fn send_request(&mut self, piece: usize, begin: usize, length: usize) {
+        println!("peer: send_request to {}", self);
+
+        let mut index = usize_to_byte_vec(piece);
+        let mut begin = usize_to_byte_vec(begin);
+        let mut length = usize_to_byte_vec(length);
+
+        let mut data: Vec<u8> = vec![0, 0, 0, 13, 6];
+        data.append(&mut index);
+        data.append(&mut begin);
+        data.append(&mut length);
+        self.write(data);
+        self.blocks_requested += 1;
     }
 
     fn recv_handshake(&mut self, message: &Vec<u8>) {
@@ -244,12 +283,34 @@ impl Peer {
         if hash != self.info_hash {
             panic!("peer: handshake received is for wrong info hash"); //FIXME: disconnect instead of panic
         }
-        self.handshake_received = true;
+        self.is_handshake_received = true;
     }
+
+    fn recv_unchoke(&mut self, message: &Vec<u8>) {
+        println!("peer: recv_unchoke from {}", self);
+        if message.len() != 5 { // FIXME: check for data in the bytes as well
+            println!("peer: invalid unchoke");
+            return;
+        }
+        self.is_choke_received = false;
+    }
+
+    pub fn recv_piece(&mut self, message: &Vec<u8>) {
+        println!("peer: recv_piece from {}", self);
+
+        // FIXME: Simplify the slicing
+        let index: [u8; 4] = [message[5], message[6], message[7], message[8]];
+        let index: usize = unsafe { mem::transmute::<[u8; 4], u32>(index) as usize };
+        let begin: [u8; 4] = [message[9], message[10], message[11], message[12]];
+        let begin: usize = unsafe { mem::transmute::<[u8; 4], u32>(begin) as usize };
+        let block = message[13..].to_vec();
+        self.tpieces.send((index, begin, block));
+    }
+
 }
 
 impl fmt::Display for Peer {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.socket.peer_addr().unwrap())
+        write!(f, "{}", self.addr)
     }
 }

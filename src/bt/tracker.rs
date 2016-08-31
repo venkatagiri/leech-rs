@@ -29,7 +29,11 @@ impl Tracker {
 
         let benc = BEncoding::decode(buf).unwrap();
         let peers = benc.to_dict().unwrap().get("peers").unwrap().to_bytes().unwrap();
-        self.parse_peers(&peers)
+        if peers.len() <= 6 {
+            self.get_default_peers()
+        } else {
+            self.parse_peers(&peers)
+        }
     }
 
     fn parse_peers(&self, peers: &[u8]) -> Vec<SocketAddr>{
@@ -43,6 +47,13 @@ impl Tracker {
                 None
             }
         }).collect()
+    }
+
+    fn get_default_peers(&self) -> Vec<SocketAddr>{
+        let addr = "209.141.59.32";
+        let port = 51863;
+        let ip = IpAddr::from_str(&addr).unwrap();
+        vec![SocketAddr::new(ip, port)]
     }
 }
 
