@@ -49,7 +49,7 @@ pub struct PeerHandler {
     pub socket: TcpListener,
     peers: HashMap<Token, Peer>,
     token_counter: usize,
-    info_hash: Hash
+    info_hash: Hash,
 }
 
 pub const SERVER_TOKEN: Token = Token(0);
@@ -61,8 +61,15 @@ impl PeerHandler {
             socket: socket,
             peers: HashMap::new(),
             token_counter: 100,
-            info_hash: info_hash.clone()
+            info_hash: info_hash.clone(),
         }
+    }
+
+    pub fn add_peer(&mut self, event_loop: &mut EventLoop<PeerHandler>, peer: Peer) {
+        let new_token = Token(self.token_counter);
+        self.peers.insert(new_token, peer);
+        self.token_counter += 1;
+        event_loop.register(&self.peers[&new_token].socket, new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
     }
 }
 
@@ -81,12 +88,8 @@ impl Handler for PeerHandler {
                         return;
                     }
                 };
-
-                let new_token = Token(self.token_counter);
-                self.peers.insert(new_token, Peer::new(peer_socket, self.info_hash.clone()));
-                self.token_counter += 1;
-
-                event_loop.register(&self.peers[&new_token].socket, new_token, EventSet::readable(), PollOpt::edge()).unwrap();
+                let hash = self.info_hash.clone();
+                self.add_peer(event_loop, Peer::new(peer_socket, hash));
             }
             token => {
                 let mut peer = self.peers.get_mut(&token).unwrap();
@@ -96,14 +99,10 @@ impl Handler for PeerHandler {
     }
 
     fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
-        //println!("peer_handler: peer address is {}", msg);
-        println!("peer_handler: got a notification");
         match msg {
             NotifyTypes::Peer(peer) => {
-                let new_token = Token(self.token_counter);
-                self.peers.insert(new_token, peer);
-                self.token_counter += 1;
-                event_loop.register(&self.peers[&new_token].socket, new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
+                println!("peer_handler: adding a new peer");
+                self.add_peer(event_loop, peer);
             },
             NotifyTypes::Action(message_type) => {
                 println!("peer_handler: message type is {:?}", message_type);
