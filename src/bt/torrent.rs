@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::net::SocketAddr;
-use std::thread;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::cmp;
@@ -12,7 +11,7 @@ use rustc_serialize::hex::FromHex;
 use bt::bencoding::*;
 use bt::tracker::*;
 use bt::utils::*;
-use bt::peer::*;
+use bt::peer::Peer;
 
 /// Files in a Torrent
 #[derive(Clone)]

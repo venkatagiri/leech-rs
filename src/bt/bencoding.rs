@@ -41,7 +41,7 @@ impl BEncoding {
     pub fn decode_file(file: &str) -> Option<BEncoding> {
         let mut f = File::open(&file).unwrap();
         let mut buf = vec![];
-        f.read_to_end(&mut buf);
+        f.read_to_end(&mut buf).unwrap();
         Self::decode(buf)
     }
 
@@ -170,7 +170,7 @@ impl fmt::Display for BEncoding {
 }
 
 impl PartialEq for BEncoding {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _: &Self) -> bool {
         true
     }
 }

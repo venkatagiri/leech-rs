@@ -1,6 +1,6 @@
 use std::fmt;
 use std::mem;
-use rustc_serialize::hex::{FromHex, ToHex};
+use rustc_serialize::hex::ToHex;
 
 /// Contains the SHA1 hash of the decoded value.
 #[derive(Default, Clone, Copy, PartialEq)]

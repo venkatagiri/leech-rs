@@ -7,7 +7,6 @@ use std::mem;
 
 use hyper::client::Client;
 use bt::bencoding::*;
-use bt::peer::*;
 use bt::utils::*;
 
 #[derive(Default, Clone)]

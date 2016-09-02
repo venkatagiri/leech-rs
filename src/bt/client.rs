@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::mpsc;
 use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
@@ -11,14 +11,12 @@ use bt::peer::*;
 use bt::utils::*;
 
 pub struct Client {
-    //torrent: Arc<Mutex<Torrent>>
     torrent: Torrent,
 }
 
 impl Client {
     pub fn new(file: &str) -> Client {
         Client {
-            //torrent: Arc::new(Mutex::new(Torrent::new(&file).unwrap()))
             torrent: Torrent::new(&file).unwrap()
         }
     }
@@ -82,7 +80,7 @@ impl Client {
                 // Go through the seeders and request pieces
                 for block in 0..block_count {
                     let size = self.torrent.get_block_size(piece, block);
-                    for (addr, seeder) in &mut self.torrent.seeders {
+                    for (_, seeder) in &mut self.torrent.seeders {
                         // FIXME: check bitfield and only dl from peers who have the piece
 
                         // Request only 1 block from each seeder at a time
@@ -124,7 +122,7 @@ impl Client {
                     println!("torrent: no peers found!");
                 } else {
                     for peer in &peer_addresses {
-                        event_loop_channel.send(Actions::AddPeer(*peer));
+                        event_loop_channel.send(Actions::AddPeer(*peer)).unwrap();
                     }
                 }
                 thread::sleep(Duration::from_secs(30 * 60)); // 30 mins

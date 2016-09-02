@@ -5,6 +5,7 @@ pub struct Magnet {
     pub tr: Vec<String>
 }
 
+#[allow(dead_code)]
 impl Magnet {
     pub fn new(input: &str) -> Result<Magnet, &str> {
         if !input.starts_with("magnet:?") {

@@ -5,7 +5,6 @@ use std::mem;
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use rustc_serialize::hex::FromHex;
 use mio::*;
 use mio::tcp::*;
 
@@ -13,6 +12,7 @@ use bt::utils::*;
 
 // BitTorrent message types
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum MessageType {
     Unknown = -3,
     Handshake = -2,
@@ -29,6 +29,7 @@ pub enum MessageType {
     Port = 9,
 }
 
+#[allow(unused_comparisons)]
 impl MessageType {
     fn from_u8(id: u8) -> MessageType {
         if 0 <= id && id <= 9 {
@@ -43,7 +44,6 @@ impl MessageType {
 pub enum Actions {
     AddPeer(SocketAddr),
     SendData(SocketAddr, Vec<u8>),
-    //RecvPiece(usize, usize, Vec<u8>),
 }
 
 pub const SERVER_TOKEN: Token = Token(0);
@@ -53,7 +53,6 @@ pub const TIMER_TOKEN: Token = Token(1);
 pub struct PeerHandler {
     pub socket: TcpListener,
     streams: HashMap<Token, TcpStream>,
-    map_addr_to_token: HashMap<SocketAddr, Token>,
     token_counter: usize,
     data_channel: mpsc::Sender<(SocketAddr, Vec<u8>)>,
 }
@@ -63,17 +62,15 @@ impl PeerHandler {
         PeerHandler {
             socket: socket,
             streams: HashMap::new(),
-            map_addr_to_token: HashMap::new(),
             token_counter: 100,
             data_channel: chn,
         }
     }
 
-    pub fn add_stream(&mut self, event_loop: &mut EventLoop<PeerHandler>, addr: SocketAddr, stream: TcpStream) {
+    pub fn add_stream(&mut self, event_loop: &mut EventLoop<PeerHandler>, stream: TcpStream) {
         let new_token = Token(self.token_counter);
         self.token_counter += 1;
         self.streams.insert(new_token, stream);
-        self.map_addr_to_token.insert(addr, new_token);
         event_loop.register(&self.streams[&new_token], new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
     }
 }
@@ -88,15 +85,15 @@ impl Handler for PeerHandler {
             match token {
                 SERVER_TOKEN => {
                     println!("peer_handler: accepting a new connection");
-                    let (peer_socket, addr) = match self.socket.accept() {
-                        Ok(Some((sock, addr))) => (sock, addr),
+                    let peer_socket = match self.socket.accept() {
+                        Ok(Some((sock, _))) => sock,
                         Ok(None) => unreachable!(),
                         Err(e) => {
                             println!("peer_server: accept error {}", e);
                             return;
                         }
                     };
-                    self.add_stream(event_loop, addr, peer_socket);
+                    self.add_stream(event_loop, peer_socket);
                 }
                 token => {
                     println!("peer_handler: received data for token {}", token.0);
@@ -106,7 +103,7 @@ impl Handler for PeerHandler {
                     println!("peer_handler: got {} bytes of data for token {}", bytes_length, token.0);
                     let data = buffer[0..bytes_length].to_vec();
                     let addr = socket.peer_addr().unwrap();
-                    self.data_channel.send((addr, data));
+                    self.data_channel.send((addr, data)).unwrap();
                 }
             }
         }
@@ -115,7 +112,7 @@ impl Handler for PeerHandler {
             println!("peer_handler: socket is writable for token {}", token.0);
             let socket = self.streams.get_mut(&token).unwrap();
             let addr = socket.peer_addr().unwrap();
-            self.data_channel.send((addr, vec![]));
+            self.data_channel.send((addr, vec![])).unwrap();
         }
     }
 
@@ -124,11 +121,11 @@ impl Handler for PeerHandler {
             Actions::AddPeer(addr) => {
                 println!("peer_handler: adding a new addr {}", addr);
                 let socket = TcpStream::connect(&addr).unwrap();
-                self.add_stream(event_loop, addr, socket);
+                self.add_stream(event_loop, socket);
             },
             Actions::SendData(addr, data) => {
                 println!("peer_handler: actions: got data for addr {}", addr);
-                for (token, mut socket) in &mut self.streams {
+                for (_, mut socket) in &mut self.streams {
                     if socket.peer_addr().unwrap() == addr {
                         let len = socket.write(&data).unwrap();
                         println!("peer_handler: wrote {} bytes to {}", len , addr);
@@ -179,7 +176,7 @@ impl Peer {
     }
 
     fn write(&self, data: Vec<u8>) {
-        self.channel.send(Actions::SendData(self.addr, data));
+        self.channel.send(Actions::SendData(self.addr, data)).unwrap();
     }
 
     pub fn process_data(&mut self) {
@@ -251,7 +248,7 @@ impl Peer {
             return;
         }
         println!("peer: send_interested to {}", self);
-        let mut data: Vec<u8> = vec![0, 0, 0, 1, 2];
+        let data: Vec<u8> = vec![0, 0, 0, 1, 2];
 
         self.write(data);
         self.is_interested_sent = true;
@@ -304,7 +301,7 @@ impl Peer {
         let begin: [u8; 4] = [message[9], message[10], message[11], message[12]];
         let begin: usize = unsafe { mem::transmute::<[u8; 4], u32>(begin) as usize };
         let block = message[13..].to_vec();
-        self.tpieces.send((index, begin, block));
+        self.tpieces.send((index, begin, block)).unwrap();
     }
 
 }
