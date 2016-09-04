@@ -1,6 +1,7 @@
 extern crate hyper;
 extern crate rustc_serialize;
 extern crate mio;
+extern crate sha1;
 
 mod bt;
 use bt::client::Client;

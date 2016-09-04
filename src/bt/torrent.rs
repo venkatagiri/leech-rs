@@ -7,7 +7,7 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
 
-use rustc_serialize::hex::FromHex;
+use sha1;
 use bt::bencoding::*;
 use bt::tracker::*;
 use bt::utils::*;
@@ -41,13 +41,18 @@ impl Torrent {
     pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
         let root = BEncoding::decode_file(&file).unwrap();
         let info = try!(root.get_dict("info"));
+        let info_hash = {
+            let data = BEncoding::encode(&info);
+            let mut m = sha1::Sha1::new();
+            m.update(&data[..]);
+            m.digest().bytes().to_vec()
+        };
+
+        let info = try!(root.get_dict("info"));
         let name = try!(info.get_str("name"));
-        // FIXME: pick up http tracker from announce-list
-        let tracker = try!(root.get_str("announce"));
+        let tracker = try!(root.get_str("announce")); // FIXME: pick up http tracker from announce-list
         let piece_size = try!(info.get_int("piece length")) as usize;
         let pieces = try!(info.get_bytes("pieces"));
-        // FIXME: calculate info hash(sha1) from info dictionary
-        let info_hash = "3c71d81012ceec6adcf8c6009c92fde50878b9cf".from_hex().unwrap(); // FIXME: use proper info_hash
 
         // Split the pieces into 20 byte sha1 hashes
         let hashes: Vec<Hash> = pieces.chunks(20).map(|chunk| {

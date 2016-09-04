@@ -7,3 +7,4 @@ authors = ["reddy"]
 hyper = "~0.9"
 rustc-serialize = "0.3"
 mio = "0.5"
+sha1 = "0.2"

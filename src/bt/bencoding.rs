@@ -50,6 +50,10 @@ impl BEncoding {
         decode_next_type(&mut iter)
     }
 
+    pub fn encode(val: &BEncoding) -> Vec<u8> {
+        encode_next_type(val)
+    }
+
     fn to_int(&self) -> Result<i64, BEncodingParseError> {
         match *self {
             BEncoding::Int(val) => Ok(val),
@@ -241,3 +245,54 @@ fn decode_next_type(mut iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
         _ => decode_str(&mut iter),
     }
 }
+
+fn encode_int(num: i64) -> Vec<u8> {
+    let mut data = vec![INT_START];
+    let mut num = format!("{}", num).bytes().collect();
+    data.append(&mut num);
+    data.push(TYPE_END);
+    data
+}
+
+fn encode_str(input: &String) -> Vec<u8> {
+    format!("{}:{}", input.len(), input).bytes().collect::<Vec<u8>>()
+}
+
+fn encode_bytes(input: &Vec<u8>) -> Vec<u8> {
+    let mut input = input.clone();
+    let mut data = format!("{}:", input.len()).bytes().collect::<Vec<u8>>();
+    data.append(&mut input);
+    data
+}
+
+fn encode_list(list: &Vec<BEncoding>) -> Vec<u8> {
+    let mut data = vec![LIST_START];
+    for item in list {
+        let mut d = encode_next_type(item);
+        data.append(&mut d);
+    }
+    data.push(TYPE_END);
+    data
+}
+
+fn encode_dict(map: &BTreeMap<String, BEncoding>) -> Vec<u8> {
+    let mut data = vec![DICT_START];
+    for (key, value) in map {
+        let mut ekey = encode_str(key);
+        data.append(&mut ekey);
+        let mut evalue = encode_next_type(value);
+        data.append(&mut evalue);
+    }
+    data.push(TYPE_END);
+    data
+}
+
+fn encode_next_type(value: &BEncoding) -> Vec<u8> {
+    match value {
+        &BEncoding::Dict(ref map) => encode_dict(map),
+        &BEncoding::List(ref list) => encode_list(list),
+        &BEncoding::Int(val) => encode_int(val),
+        &BEncoding::Str(ref val) => encode_bytes(val)
+    }
+}
+
