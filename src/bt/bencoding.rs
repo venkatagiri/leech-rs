@@ -85,41 +85,34 @@ impl BEncoding {
         }
     }
 
-    pub fn get_hash_string(&self, map: &BTreeMap<String, BEncoding>, key: &str) -> Result<String, BEncodingParseError> {
-        let value = try!(map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string())));
-        value.to_str()
+    pub fn get_dict(&self, key: &str) -> Result<&BEncoding, BEncodingParseError> {
+        let map = try!(self.to_dict());
+        map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string()))
     }
 
-    pub fn get_hash_int(&self, map: &BTreeMap<String, BEncoding>, key: &str) -> Result<i64, BEncodingParseError> {
-        let value = try!(map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string())));
+    pub fn get_value(&self, key: &str) -> Result<&BEncoding, BEncodingParseError> {
+        let map = try!(self.to_dict());
+        map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string()))
+    }
+
+    pub fn get_int(&self, key: &str) -> Result<i64, BEncodingParseError> {
+        let value = try!(self.get_value(key));
         value.to_int()
     }
 
-    pub fn get_dict_string(&self, key: &str) -> Result<String, BEncodingParseError> {
-        let map = try!(self.to_dict());
-        self.get_hash_string(map, key)
+    pub fn get_str(&self, key: &str) -> Result<String, BEncodingParseError> {
+        let value = try!(self.get_value(key));
+        value.to_str()
     }
 
-    pub fn get_info_bytes(&self, key: &str) -> Result<Vec<u8>, BEncodingParseError> {
-        let map = try!(self.to_dict());
-        let info = try!(map.get("info").ok_or(BEncodingParseError::MissingKey("info".to_string())));
-        let info_map = try!(info.to_dict());
-        let value = try!(info_map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string())));
+    pub fn get_bytes(&self, key: &str) -> Result<Vec<u8>, BEncodingParseError> {
+        let value = try!(self.get_value(key));
         value.to_bytes()
     }
 
-    pub fn get_info_string(&self, key: &str) -> Result<String, BEncodingParseError> {
-        let map = try!(self.to_dict());
-        let info = try!(map.get("info").ok_or(BEncodingParseError::MissingKey("info".to_string())));
-        let info_map = try!(info.to_dict());
-        self.get_hash_string(info_map, key)
-    }
-
-    pub fn get_info_int(&self, key: &str) -> Result<i64, BEncodingParseError> {
-        let map = try!(self.to_dict());
-        let info = try!(map.get("info").ok_or(BEncodingParseError::MissingKey("info".to_string())));
-        let info_map = try!(info.to_dict());
-        self.get_hash_int(info_map, key)
+    pub fn get_list(&self, key: &str) -> Result<&Vec<BEncoding>, BEncodingParseError> {
+        let value = try!(self.get_value(key));
+        value.to_list()
     }
 }
 

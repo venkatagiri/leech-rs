@@ -39,12 +39,13 @@ pub struct Torrent {
 
 impl Torrent {
     pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
-        let data = BEncoding::decode_file(&file).unwrap();
-        let name = try!(data.get_info_string("name"));
+        let root = BEncoding::decode_file(&file).unwrap();
+        let info = try!(root.get_dict("info"));
+        let name = try!(info.get_str("name"));
         // FIXME: pick up http tracker from announce-list
-        let tracker = try!(data.get_dict_string("announce"));
-        let piece_size = try!(data.get_info_int("piece length")) as usize;
-        let pieces = try!(data.get_info_bytes("pieces"));
+        let tracker = try!(root.get_str("announce"));
+        let piece_size = try!(info.get_int("piece length")) as usize;
+        let pieces = try!(info.get_bytes("pieces"));
         // FIXME: calculate info hash(sha1) from info dictionary
         let info_hash = "3c71d81012ceec6adcf8c6009c92fde50878b9cf".from_hex().unwrap(); // FIXME: use proper info_hash
 
@@ -57,15 +58,12 @@ impl Torrent {
         let no_of_pieces = hashes.len();
 
         // Parse files list from the info
-        let map = data.to_dict().unwrap();
-        let info = map.get("info").unwrap().to_dict().unwrap();
         let mut file_items = vec![];
-        if let Some(files) = info.get("files") {
+        if let Ok(files) = info.get_list("files") {
             // Multiple File Mode
-            let file_list = files.to_list().unwrap();
             let dir = name.clone();
             let mut offset = 0;
-            for file in file_list {
+            for file in files {
                 let f1 = file.to_dict().unwrap();
                 let len = f1.get("length").unwrap().to_int().unwrap() as usize;
                 let path = f1.get("path").unwrap().to_list().unwrap();
@@ -84,7 +82,7 @@ impl Torrent {
             }
         } else {
             // Single File Mode
-            let file_length = try!(data.get_info_int("length")) as usize;
+            let file_length = try!(info.get_int("length")) as usize;
             let file_name = name.clone();
             let mut file_path = PathBuf::from(".");
             file_path.push(file_name);
