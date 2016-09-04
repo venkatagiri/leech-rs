@@ -26,8 +26,8 @@ impl Tracker {
         let mut response = client.get(&url).send().unwrap();
         response.read_to_end(&mut buf).unwrap();
 
-        let benc = BEncoding::decode(buf).unwrap();
-        let peers = benc.to_dict().unwrap().get("peers").unwrap().to_bytes().unwrap();
+        let root = BEncoding::decode(buf).unwrap();
+        let peers = root.get_bytes("peers").unwrap();
         if peers.len() <= 6 {
             self.get_default_peers()
         } else {

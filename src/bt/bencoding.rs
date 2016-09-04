@@ -50,21 +50,21 @@ impl BEncoding {
         decode_next_type(&mut iter)
     }
 
-    pub fn to_int(&self) -> Result<i64, BEncodingParseError> {
+    fn to_int(&self) -> Result<i64, BEncodingParseError> {
         match *self {
             BEncoding::Int(val) => Ok(val),
             _ => Err(BEncodingParseError::NotAInt),
         }
     }
 
-    pub fn to_dict(&self) -> Result<&BTreeMap<String, BEncoding>, BEncodingParseError> {
+    fn to_dict(&self) -> Result<&BTreeMap<String, BEncoding>, BEncodingParseError> {
         match *self {
             BEncoding::Dict(ref map) => Ok(map),
             _ => Err(BEncodingParseError::NotADict),
         }
     }
 
-    pub fn to_list(&self) -> Result<&Vec<BEncoding>, BEncodingParseError> {
+    fn to_list(&self) -> Result<&Vec<BEncoding>, BEncodingParseError> {
         match *self {
             BEncoding::List(ref list) => Ok(list),
             _ => Err(BEncodingParseError::NotAList),
@@ -78,7 +78,7 @@ impl BEncoding {
         }
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>, BEncodingParseError> {
+    fn to_bytes(&self) -> Result<Vec<u8>, BEncodingParseError> {
         match *self {
             BEncoding::Str(ref val) => Ok(val.clone()),
             _ => Err(BEncodingParseError::NotAStr),
@@ -90,7 +90,7 @@ impl BEncoding {
         map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string()))
     }
 
-    pub fn get_value(&self, key: &str) -> Result<&BEncoding, BEncodingParseError> {
+    fn get_value(&self, key: &str) -> Result<&BEncoding, BEncodingParseError> {
         let map = try!(self.to_dict());
         map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string()))
     }
