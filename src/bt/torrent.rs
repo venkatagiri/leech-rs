@@ -64,9 +64,8 @@ impl Torrent {
             let dir = name.clone();
             let mut offset = 0;
             for file in files {
-                let f1 = file.to_dict().unwrap();
-                let len = f1.get("length").unwrap().to_int().unwrap() as usize;
-                let path = f1.get("path").unwrap().to_list().unwrap();
+                let len = try!(file.get_int("length")) as usize;
+                let path = try!(file.get_list("path"));
                 let mut file_path = PathBuf::from("."); // FIXME: change this to download directory
                 file_path.push(dir.clone());
                 for part in path {
