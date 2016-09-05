@@ -1,5 +1,7 @@
 use std::fmt;
 use std::mem;
+
+use sha1;
 use rustc_serialize::hex::ToHex;
 
 /// Contains the SHA1 hash of the decoded value.
@@ -38,6 +40,13 @@ pub fn usize_to_byte_vec(input: usize) -> Vec<u8> {
     let mut data: [u8; 4] = unsafe { mem::transmute::<u32, [u8; 4]>(input as u32) };
     data.reverse();
     data.to_vec()
+}
+
+/// Calculate sha1 of a vector
+pub fn sha1(data: &Vec<u8>) -> Vec<u8> {
+    let mut m = sha1::Sha1::new();
+    m.update(&data[..]);
+    m.digest().bytes().to_vec()
 }
 
 // Peer ID used in messages (FIXME: simpler init)

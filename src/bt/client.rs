@@ -32,7 +32,6 @@ impl Client {
         }
 
         loop {
-            println!("client: main loop");
             // Push data packets received from event loop to each Peer
             while let Ok(packet) = rx.try_recv() {
                 let (addr, data) = packet;
@@ -69,29 +68,8 @@ impl Client {
             }
 
             // Process Downloads
-            for piece in 0..self.torrent.no_of_pieces {
-                // Check if the piece is already downloaded
-                if self.torrent.is_piece_downloaded[piece] {
-                    continue;
-                }
+            self.process_downloads();
 
-                let block_count = self.torrent.get_block_count(piece);
-                println!("block count: {}", block_count);
-                // Go through the seeders and request pieces
-                for block in 0..block_count {
-                    let size = self.torrent.get_block_size(piece, block);
-                    for (_, seeder) in &mut self.torrent.seeders {
-                        // FIXME: check bitfield and only dl from peers who have the piece
-
-                        // Request only 1 block from each seeder at a time
-                        if seeder.blocks_requested > 0 {
-                            continue;
-                        }
-
-                        seeder.send_request(piece, block * BLOCK_SIZE, size);
-                    }
-                }
-            }
             thread::sleep(Duration::from_secs(1));
         }
     }
@@ -128,5 +106,34 @@ impl Client {
                 thread::sleep(Duration::from_secs(30 * 60)); // 30 mins
             }
         });
+    }
+
+    fn process_downloads(&mut self) {
+        if self.torrent.is_complete() {
+            return;
+        }
+
+        for piece in 0..self.torrent.no_of_pieces {
+            // Check if the piece is already downloaded
+            if self.torrent.is_piece_downloaded[piece] {
+                continue;
+            }
+
+            let block_count = self.torrent.get_block_count(piece);
+            // Go through the seeders and request pieces
+            for block in 0..block_count {
+                let size = self.torrent.get_block_size(piece, block);
+                for (_, seeder) in &mut self.torrent.seeders {
+                    // FIXME: check bitfield and only dl from peers who have the piece
+
+                    // Request only 1 block from each seeder at a time
+                    if seeder.blocks_requested > 0 {
+                        continue;
+                    }
+
+                    seeder.send_request(piece, block * BLOCK_SIZE, size);
+                }
+            }
+        }
     }
 }

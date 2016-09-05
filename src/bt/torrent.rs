@@ -3,11 +3,13 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::cmp;
-use std::io::Seek;
-use std::io::SeekFrom;
-use std::io::Write;
+use std::io::{
+    Seek,
+    SeekFrom,
+    Write,
+    Read
+};
 
-use sha1;
 use bt::bencoding::*;
 use bt::tracker::*;
 use bt::utils::*;
@@ -43,9 +45,7 @@ impl Torrent {
         let info = try!(root.get_dict("info"));
         let info_hash = {
             let data = BEncoding::encode(&info);
-            let mut m = sha1::Sha1::new();
-            m.update(&data[..]);
-            m.digest().bytes().to_vec()
+            sha1(&data)
         };
 
         let info = try!(root.get_dict("info"));
@@ -123,19 +123,19 @@ impl Torrent {
 
     pub fn write_block(&mut self, piece: usize, block: usize, data: Vec<u8>) {
         self.write(piece * self.piece_size + block * BLOCK_SIZE, data);
+        {
+            let b_blocks = self.is_block_downloaded.get_mut(&piece).unwrap();
+            b_blocks[block] = true;
+        }
         let block_count = self.get_block_count(piece);
-        let b_blocks = self.is_block_downloaded.get_mut(&piece).unwrap();
-        b_blocks[block] = true;
-        let completed_block_count = b_blocks.iter().map(|b| { if *b == true { 1 } else { 0 } }).fold(0, |sum, x| sum + x);
+        let completed_block_count = self.get_completed_block_count(piece);
         if block_count == completed_block_count {
-            // FIXME: Verify Piece before marking as downloaded
-            self.is_piece_downloaded[piece] = true;
+            self.verify_piece(piece);
         }
     }
 
     fn write(&self, start: usize, data: Vec<u8>) {
         let end = start + data.len();
-        println!("torrent: start {} end {}", start, end);
         for file in &self.files {
             if (start < file.offset && end < file.offset) || (start > file.offset + file.length && end > file.offset + file.length) {
                 continue;
@@ -152,8 +152,56 @@ impl Torrent {
         }
     }
 
+    fn verify_piece(&mut self, piece: usize) {
+        let data = self.read_piece(piece);
+        let sha1 = sha1(&data);
+        let hash = Hash::from_vec(&sha1);
+        if self.pieces_hashes.get(piece) == Some(&hash) {
+            self.is_piece_downloaded[piece] = true;
+            if self.is_complete() {
+                println!("client: torrent download is complete");
+            }
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.get_completed_piece_count() == self.no_of_pieces
+    }
+
+    fn read_piece(&self, piece: usize) -> Vec<u8> {
+        let start = piece * self.piece_size;
+        let end = cmp::min(self.get_total_size(), (piece + 1) * self.piece_size);
+        let mut data = vec![];
+
+        for file in &self.files {
+            if (start < file.offset && end < file.offset) || (start > file.offset + file.length && end > file.offset + file.length) {
+                continue;
+            }
+            let fstart = cmp::max(0, start - file.offset);
+            let fend = cmp::min(end - file.offset, file.length);
+            let flength = fend - fstart;
+            let mut buffer = vec![0; flength];
+
+            let mut f = OpenOptions::new().read(true).open(&file.path).unwrap();
+            f.seek(SeekFrom::Start(fstart as u64)).unwrap();
+            f.read_exact(&mut buffer).unwrap();
+
+            data.append(&mut buffer);
+        }
+
+        data
+    }
+
     pub fn get_block_count(&self, piece: usize) -> usize {
         (self.get_piece_size(piece) / BLOCK_SIZE) + 1
+    }
+
+    fn get_completed_block_count(&self, piece: usize) -> usize {
+        self.is_block_downloaded.get(&piece).unwrap().iter().map(|b| { if *b == true { 1 } else { 0 } }).fold(0, |sum, x| sum + x)
+    }
+
+    fn get_completed_piece_count(&self) -> usize {
+        self.is_piece_downloaded.iter().map(|b| { if *b == true { 1 } else { 0 } }).fold(0, |sum, x| sum + x)
     }
 
     pub fn get_block_size(&self, piece: usize, block: usize) -> usize {

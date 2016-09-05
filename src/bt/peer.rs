@@ -132,7 +132,7 @@ impl Handler for PeerHandler {
                         break;
                     }
                 }
-            }
+            },
         }
     }
 }
