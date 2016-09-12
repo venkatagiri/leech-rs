@@ -104,7 +104,7 @@ impl Torrent {
         let mut t = Torrent {
             name: name,
             info_hash: Hash::from_vec(&info_hash),
-            tracker: Tracker{url: tracker, info_hash: Hash::from_vec(&info_hash)},
+            tracker: Tracker::new(tracker, Hash::from_vec(&info_hash)),
             piece_size: piece_size,
             pieces_hashes: hashes,
             files: file_items,

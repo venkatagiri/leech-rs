@@ -42,6 +42,29 @@ pub fn u32_to_byte_slice(input: u32) -> Vec<u8> {
     data.to_vec()
 }
 
+/// Transmutes u64 to byte slice
+pub fn u64_to_byte_slice(input: u64) -> Vec<u8> {
+    let mut data: [u8; 8] = unsafe { mem::transmute::<u64, [u8; 8]>(input) };
+    data.reverse();
+    data.to_vec()
+}
+
+/// Transmutes byte slice to u64
+pub fn byte_slice_to_u64(input: &[u8]) -> u64 {
+    let mut val: [u8; 8] = [0; 8];
+    val.copy_from_slice(input);
+    val.reverse();
+    unsafe { mem::transmute::<[u8; 8], u64>(val) }
+}
+
+/// Transmutes byte slice to usize
+pub fn byte_slice_to_u32(input: &[u8]) -> u32 {
+    let mut val: [u8; 4] = [0; 4];
+    val.copy_from_slice(input);
+    val.reverse();
+    unsafe { mem::transmute::<[u8; 4], u32>(val) }
+}
+
 /// Calculate sha1 of a vector
 pub fn sha1(data: &Vec<u8>) -> Vec<u8> {
     let mut m = sha1::Sha1::new();
