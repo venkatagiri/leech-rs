@@ -57,10 +57,10 @@ impl Client {
                 if !peer.is_handshake_sent || !peer.is_handshake_received {
                     continue;
                 }
-    
+
                 peer.send_interested();
                 // FIXME: send keep alive
-    
+
                 if !peer.is_choke_received && !self.torrent.seeders.contains_key(&addr) {
                     println!("client: adding {} to seeders", addr);
                     self.torrent.seeders.insert(*addr, peer.clone());
@@ -75,7 +75,7 @@ impl Client {
     }
 
     fn spawn_event_loop(&self, sender: mpsc::Sender<(SocketAddr, Vec<u8>)>) -> Sender<Actions> {
-        println!("client: creating event loop");
+        println!("client: spawning event loop thread");
 
         let address = "0.0.0.0:56789".parse::<SocketAddr>().unwrap();
         let server_socket = TcpListener::bind(&address).unwrap();
@@ -93,6 +93,8 @@ impl Client {
     }
 
     fn spawn_tracker_update(&self, event_loop_channel: Sender<Actions>, tracker: Tracker) {
+        println!("client: spawning tracker thread");
+
         thread::spawn(move || {
             loop {
                 let peer_addresses = tracker.get_peers_addresses();
