@@ -36,8 +36,8 @@ impl fmt::Display for Hash {
 }
 
 /// Transmutes u32 to byte slice
-pub fn usize_to_byte_vec(input: usize) -> Vec<u8> {
-    let mut data: [u8; 4] = unsafe { mem::transmute::<u32, [u8; 4]>(input as u32) };
+pub fn u32_to_byte_slice(input: u32) -> Vec<u8> {
+    let mut data: [u8; 4] = unsafe { mem::transmute::<u32, [u8; 4]>(input) };
     data.reverse();
     data.to_vec()
 }

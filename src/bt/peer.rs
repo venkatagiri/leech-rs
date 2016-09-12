@@ -257,9 +257,9 @@ impl Peer {
     pub fn send_request(&mut self, piece: usize, begin: usize, length: usize) {
         println!("peer: send_request to {}", self);
 
-        let mut index = usize_to_byte_vec(piece);
-        let mut begin = usize_to_byte_vec(begin);
-        let mut length = usize_to_byte_vec(length);
+        let mut index = u32_to_byte_slice(piece as u32);
+        let mut begin = u32_to_byte_slice(begin as u32);
+        let mut length = u32_to_byte_slice(length as u32);
 
         let mut data: Vec<u8> = vec![0, 0, 0, 13, 6];
         data.append(&mut index);
