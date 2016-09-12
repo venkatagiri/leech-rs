@@ -186,7 +186,7 @@ impl Torrent {
             f.seek(SeekFrom::Start(fstart as u64)).unwrap();
             f.read_exact(&mut buffer).unwrap();
 
-            data.append(&mut buffer);
+            data.extend_from_slice(&buffer);
         }
 
         data

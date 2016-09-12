@@ -248,8 +248,8 @@ fn decode_next_type(mut iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
 
 fn encode_int(num: i64) -> Vec<u8> {
     let mut data = vec![INT_START];
-    let mut num = format!("{}", num).bytes().collect();
-    data.append(&mut num);
+    let num: Vec<_> = format!("{}", num).bytes().collect();
+    data.extend_from_slice(&num);
     data.push(TYPE_END);
     data
 }
@@ -259,17 +259,15 @@ fn encode_str(input: &String) -> Vec<u8> {
 }
 
 fn encode_bytes(input: &Vec<u8>) -> Vec<u8> {
-    let mut input = input.clone();
     let mut data = format!("{}:", input.len()).bytes().collect::<Vec<u8>>();
-    data.append(&mut input);
+    data.extend_from_slice(&input);
     data
 }
 
 fn encode_list(list: &Vec<BEncoding>) -> Vec<u8> {
     let mut data = vec![LIST_START];
     for item in list {
-        let mut d = encode_next_type(item);
-        data.append(&mut d);
+        data.extend_from_slice(&encode_next_type(item));
     }
     data.push(TYPE_END);
     data
@@ -278,10 +276,8 @@ fn encode_list(list: &Vec<BEncoding>) -> Vec<u8> {
 fn encode_dict(map: &BTreeMap<String, BEncoding>) -> Vec<u8> {
     let mut data = vec![DICT_START];
     for (key, value) in map {
-        let mut ekey = encode_str(key);
-        data.append(&mut ekey);
-        let mut evalue = encode_next_type(value);
-        data.append(&mut evalue);
+        data.extend_from_slice(&encode_str(key));
+        data.extend_from_slice(&encode_next_type(value));
     }
     data.push(TYPE_END);
     data

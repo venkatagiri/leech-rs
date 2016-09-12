@@ -171,8 +171,8 @@ impl Peer {
         p
     }
 
-    pub fn read(&mut self, mut data: Vec<u8>) {
-        self.data.append(&mut data);
+    pub fn read(&mut self, data: Vec<u8>) {
+        self.data.extend_from_slice(&data);
     }
 
     fn write(&self, data: Vec<u8>) {
@@ -234,10 +234,10 @@ impl Peer {
         println!("peer: send_handshake to {}", self);
         let mut data: Vec<u8> = vec![];
         data.push(19);
-        data.append(&mut b"BitTorrent protocol".to_vec());
-        data.append(&mut [0; 8].to_vec());
-        data.append(&mut self.info_hash.0.to_vec());
-        data.append(&mut MY_PEER_ID.0.to_vec());
+        data.extend_from_slice(b"BitTorrent protocol");
+        data.extend_from_slice(&[0; 8]);
+        data.extend_from_slice(&self.info_hash.0);
+        data.extend_from_slice(&MY_PEER_ID.0);
 
         self.write(data);
         self.is_handshake_sent = true;
@@ -257,14 +257,15 @@ impl Peer {
     pub fn send_request(&mut self, piece: usize, begin: usize, length: usize) {
         println!("peer: send_request to {}", self);
 
-        let mut index = u32_to_byte_slice(piece as u32);
-        let mut begin = u32_to_byte_slice(begin as u32);
-        let mut length = u32_to_byte_slice(length as u32);
+        let index = u32_to_byte_slice(piece as u32);
+        let begin = u32_to_byte_slice(begin as u32);
+        let length = u32_to_byte_slice(length as u32);
 
         let mut data: Vec<u8> = vec![0, 0, 0, 13, 6];
-        data.append(&mut index);
-        data.append(&mut begin);
-        data.append(&mut length);
+        data.extend_from_slice(&index);
+        data.extend_from_slice(&begin);
+        data.extend_from_slice(&length);
+
         self.write(data);
         self.blocks_requested += 1;
     }
