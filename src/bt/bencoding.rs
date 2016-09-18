@@ -68,7 +68,7 @@ impl BEncoding {
         }
     }
 
-    fn to_list(&self) -> Result<&Vec<BEncoding>, BEncodingParseError> {
+    pub fn to_list(&self) -> Result<&Vec<BEncoding>, BEncodingParseError> {
         match *self {
             BEncoding::List(ref list) => Ok(list),
             _ => Err(BEncodingParseError::NotAList),
@@ -247,8 +247,8 @@ fn decode_next_type(mut iter: &mut Peekable<Iter<u8>>) -> Option<BEncoding> {
 }
 
 fn encode_int(num: i64) -> Vec<u8> {
-    let mut data = vec![INT_START];
     let num: Vec<_> = format!("{}", num).bytes().collect();
+    let mut data = vec![INT_START];
     data.extend_from_slice(&num);
     data.push(TYPE_END);
     data
@@ -288,7 +288,7 @@ fn encode_next_type(value: &BEncoding) -> Vec<u8> {
         &BEncoding::Dict(ref map) => encode_dict(map),
         &BEncoding::List(ref list) => encode_list(list),
         &BEncoding::Int(val) => encode_int(val),
-        &BEncoding::Str(ref val) => encode_bytes(val)
+        &BEncoding::Str(ref val) => encode_bytes(val),
     }
 }
 

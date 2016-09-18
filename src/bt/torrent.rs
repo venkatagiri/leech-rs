@@ -42,6 +42,7 @@ pub struct Torrent {
 impl Torrent {
     pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
         let root = BEncoding::decode_file(&file).unwrap();
+        println!("torrent: contents {}", root);
         let info = try!(root.get_dict("info"));
         let info_hash = {
             let data = BEncoding::encode(&info);
@@ -50,7 +51,17 @@ impl Torrent {
 
         let info = try!(root.get_dict("info"));
         let name = try!(info.get_str("name"));
-        let tracker = try!(root.get_str("announce")); // FIXME: pick up http tracker from announce-list
+
+        let mut tracker_list = vec![];
+        tracker_list.push(try!(root.get_str("announce")));
+        if let Ok(announce_list) = root.get_list("announce-list") {
+            for list in announce_list {
+                for tracker in try!(list.to_list()) {
+                    tracker_list.push(try!(tracker.to_str()));
+                }
+            }
+        }
+
         let piece_size = try!(info.get_int("piece length")) as usize;
         let pieces = try!(info.get_bytes("pieces"));
 
@@ -104,7 +115,7 @@ impl Torrent {
         let mut t = Torrent {
             name: name,
             info_hash: Hash::from_vec(&info_hash),
-            tracker: Tracker::new(tracker, Hash::from_vec(&info_hash)),
+            tracker: Tracker::new(tracker_list, Hash::from_vec(&info_hash)),
             piece_size: piece_size,
             pieces_hashes: hashes,
             files: file_items,

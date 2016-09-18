@@ -9,6 +9,7 @@ use std::net::{
     UdpSocket,
 };
 use std::mem;
+use std::time::Duration;
 
 use hyper::client::Client;
 use bt::bencoding::*;
@@ -27,19 +28,30 @@ fn parse_peers(peers: &[u8]) -> Vec<SocketAddr> {
     }).collect()
 }
 
-struct UDPTrackerProtocol {
-    addr: SocketAddr,
-    info_hash: Hash,
+/// HTTP Tracker
+struct HTTPTracker {}
+
+impl HTTPTracker {
+    fn get_peers_addresses(url: &String, info_hash: &Hash) -> Result<Vec<SocketAddr>> {
+        let client = Client::new();
+        let url = format!("{tracker}?info_hash={hash}&peer_id={peer_id}&port=56789&uploaded=0&downloaded=0&left=0&event=started&compact=1",
+                    tracker = url,
+                    hash = info_hash.url_encoded(),
+                    peer_id = MY_PEER_ID.url_encoded());
+        let mut buf = vec![];
+        let mut response = client.get(&url).send().expect("http request error");
+        response.read_to_end(&mut buf).expect("http response read error");
+
+        let root = BEncoding::decode(buf).expect("http response parse error");
+        let peers = root.get_bytes("peers").expect("peers key not found");
+        Ok(parse_peers(&peers))
+    }
 }
 
-impl UDPTrackerProtocol {
-    fn new(url: &String, info_hash: Hash) -> UDPTrackerProtocol {
-        UDPTrackerProtocol {
-            addr: Self::get_addr_from_url(url),
-            info_hash: info_hash,
-        }
-    }
+/// UDP Tracker
+struct UDPTracker {}
 
+impl UDPTracker {
     fn get_addr_from_url(url: &String) -> SocketAddr {
         let parts: Vec<_> = url.split("/").collect();
         let addr = parts[2];
@@ -47,29 +59,22 @@ impl UDPTrackerProtocol {
         addrs.first().expect("domain resolution failed").clone()
     }
 
-    fn get_peers_addresses(&self) -> Vec<SocketAddr> {
-        match self.request_addresses() {
-            Ok(res) => {
-                println!("udptracker: got {} peers back", res.len());
-                res
-            },
-            Err(err) => {
-                println!("udptracker: udp request failed! {}", err);
-                vec![]
-            },
-        }
-    }
+    fn get_peers_addresses(url: &String, info_hash: &Hash) -> Result<Vec<SocketAddr>> {
+        let addr = Self::get_addr_from_url(url);
+        let mut socket = UdpSocket::bind("0.0.0.0:55555").expect("udp bind failed");
+        try!(socket.connect(addr));
 
-    fn request_addresses(&self) -> Result<Vec<SocketAddr>> {
-        let mut socket = UdpSocket::bind("0.0.0.0:56788").expect("udp bind failed");
-        let _ = try!(self.send_connect(&mut socket));
-        let connection_id = try!(self.recv_connect(&mut socket));
-        let _ = try!(self.send_announce(&mut socket, connection_id));
-        let peers = try!(self.recv_announce(&mut socket));
+        socket.set_read_timeout(Some(Duration::from_secs(1))).expect("udp read timeout failed");
+        socket.set_write_timeout(Some(Duration::from_secs(1))).expect("udp write timeout failed");
+
+        let _ = try!(Self::send_connect(&mut socket));
+        let connection_id = try!(Self::recv_connect(&mut socket));
+        let _ = try!(Self::send_announce(&mut socket, connection_id, info_hash));
+        let peers = try!(Self::recv_announce(&mut socket));
         Ok(peers)
     }
 
-    fn send_connect(&self, socket: &mut UdpSocket) -> Result<usize> {
+    fn send_connect(socket: &mut UdpSocket) -> Result<usize> {
         let connection_id = u64_to_byte_slice(0x41727101980);
         let action = u32_to_byte_slice(0);
         let transaction_id = u32_to_byte_slice(0x1337);
@@ -79,18 +84,18 @@ impl UDPTrackerProtocol {
         buffer.extend_from_slice(&action);
         buffer.extend_from_slice(&transaction_id);
 
-        socket.send_to(&buffer, self.addr)
+        socket.send(&buffer)
     }
 
-    fn recv_connect(&self, socket: &mut UdpSocket) -> Result<u64> {
-        let mut buffer = [0; 32];
+    fn recv_connect(socket: &mut UdpSocket) -> Result<u64> {
+        let mut buffer = [0; 1024];
         let _ = try!(socket.recv(&mut buffer));
         let _ = byte_slice_to_u32(&buffer[4..8]); // FIXME: validate len, transaction_id, action
         let connection_id = byte_slice_to_u64(&buffer[8..16]);
         Ok(connection_id)
     }
 
-    fn send_announce(&self, socket: &mut UdpSocket, connection_id: u64) -> Result<usize> {
+    fn send_announce(socket: &mut UdpSocket, connection_id: u64, info_hash: &Hash) -> Result<usize> {
         let connection_id = u64_to_byte_slice(connection_id);
         let action = u32_to_byte_slice(1);
         let transaction_id = u32_to_byte_slice(0x1337);
@@ -100,7 +105,7 @@ impl UDPTrackerProtocol {
         buffer.extend_from_slice(&connection_id);
         buffer.extend_from_slice(&action);
         buffer.extend_from_slice(&transaction_id);
-        buffer.extend_from_slice(&self.info_hash.0);
+        buffer.extend_from_slice(&info_hash.0);
         buffer.extend_from_slice(&MY_PEER_ID.0);
         buffer.extend_from_slice(&[0; 8]); // downloaded
         buffer.extend_from_slice(&[0; 8]); // left
@@ -111,10 +116,10 @@ impl UDPTrackerProtocol {
         buffer.extend_from_slice(&[0; 4]); // num want
         buffer.extend_from_slice(&[0; 4]); // port
 
-        socket.send_to(&buffer, self.addr)
+        socket.send(&buffer)
     }
 
-    fn recv_announce(&self, socket: &mut UdpSocket) -> Result<Vec<SocketAddr>> {
+    fn recv_announce(socket: &mut UdpSocket) -> Result<Vec<SocketAddr>> {
         let mut buffer = vec![0; 1024];
         let len = try!(socket.recv(&mut buffer));
         Ok(parse_peers(&buffer[20..len]))
@@ -123,54 +128,45 @@ impl UDPTrackerProtocol {
 
 #[derive(Default, Clone)]
 pub struct Tracker {
-    url: String,
+    urls: Vec<String>,
     info_hash: Hash,
 }
 
 impl Tracker {
-    pub fn new(url: String, info_hash: Hash) -> Tracker {
+    pub fn new(urls: Vec<String>, info_hash: Hash) -> Tracker {
         Tracker {
-            url: url,
+            urls: urls,
             info_hash: info_hash,
         }
     }
 
     pub fn get_peers_addresses(&self) -> Vec<SocketAddr> {
-        if self.url.starts_with("udp") {
-            return self.request_udp_peers();
+        for url in &self.urls {
+            let result = if url.starts_with("udp") {
+                UDPTracker::get_peers_addresses(url, &self.info_hash)
+            } else {
+                HTTPTracker::get_peers_addresses(url, &self.info_hash)
+            };
+            match result {
+                Ok(ref list) if list.len() > 0 => {
+                    return list.clone();
+                },
+                Ok(_) => {
+                    println!("tracker: no peers found from url({})", url);
+                    continue;
+                },
+                Err(err) => {
+                    println!("tracker: error while requesting url({}): {}", url, err);
+                    continue;
+                }
+            };
         }
-        let client = Client::new();
-        let url = format!("{tracker}?info_hash={hash}&peer_id={peer_id}&port=56789&uploaded=0&downloaded=0&left=0&event=started&compact=1",
-                    tracker = self.url,
-                    hash = self.info_hash.url_encoded(),
-                    peer_id = MY_PEER_ID.url_encoded());
-        let mut buf = vec![];
-        let mut response = client.get(&url).send().unwrap();
-        response.read_to_end(&mut buf).unwrap();
-
-        let root = BEncoding::decode(buf).unwrap();
-        let peers = root.get_bytes("peers").unwrap();
-        if peers.len() <= 6 {
-            self.get_default_peers()
-        } else {
-            parse_peers(&peers)
-        }
-    }
-
-    fn request_udp_peers(&self) -> Vec<SocketAddr> {
-        UDPTrackerProtocol::new(&self.url, self.info_hash.clone()).get_peers_addresses()
-    }
-
-    fn get_default_peers(&self) -> Vec<SocketAddr> {
-        let addr = "209.141.59.32";
-        let port = 51863;
-        let ip = IpAddr::from_str(&addr).unwrap();
-        vec![SocketAddr::new(ip, port)]
+        vec![]
     }
 }
 
 impl fmt::Display for Tracker {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.url)
+        write!(f, "{:?}", self.urls)
     }
 }
