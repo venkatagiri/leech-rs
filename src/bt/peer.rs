@@ -314,11 +314,8 @@ impl Peer {
     pub fn recv_piece(&mut self, message: &Vec<u8>) {
         println!("peer: recv_piece from {}", self);
 
-        // FIXME: Simplify the slicing
-        let index: [u8; 4] = [message[5], message[6], message[7], message[8]];
-        let index: usize = unsafe { mem::transmute::<[u8; 4], u32>(index) as usize };
-        let begin: [u8; 4] = [message[9], message[10], message[11], message[12]];
-        let begin: usize = unsafe { mem::transmute::<[u8; 4], u32>(begin) as usize };
+        let index = byte_slice_to_u32(&message[5..9]) as usize;
+        let begin = byte_slice_to_u32(&message[9..13]) as usize;
         let block = message[13..].to_vec();
         self.tpieces.send((index, begin, block)).unwrap();
     }
