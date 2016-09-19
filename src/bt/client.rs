@@ -61,7 +61,7 @@ impl Client {
                 peer.send_interested();
                 // FIXME: send keep alive
 
-                if !peer.is_choke_received && !self.torrent.seeders.contains_key(&addr) {
+                if !peer.is_choke_received && self.torrent.seeders.len() < 5 && !self.torrent.seeders.contains_key(&addr) { // FIXME: make the number of seeders configurable
                     println!("client: adding {} to seeders", addr);
                     self.torrent.seeders.insert(*addr, peer.clone());
                 }
