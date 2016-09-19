@@ -1,4 +1,5 @@
 use std::io::prelude::*;
+use std::io;
 use std::net::SocketAddr;
 use std::fmt;
 use std::mem;
@@ -53,6 +54,7 @@ pub const TIMER_TOKEN: Token = Token(1);
 pub struct PeerHandler {
     pub socket: TcpListener,
     streams: HashMap<Token, TcpStream>,
+    addr_to_token: HashMap<SocketAddr, Token>,
     token_counter: usize,
     data_channel: mpsc::Sender<(SocketAddr, Vec<u8>)>,
 }
@@ -62,16 +64,35 @@ impl PeerHandler {
         PeerHandler {
             socket: socket,
             streams: HashMap::new(),
+            addr_to_token: HashMap::new(),
             token_counter: 100,
             data_channel: chn,
         }
     }
 
-    pub fn add_stream(&mut self, event_loop: &mut EventLoop<PeerHandler>, stream: TcpStream) {
+    fn add_stream(&mut self, event_loop: &mut EventLoop<PeerHandler>, addr: SocketAddr, stream: TcpStream) {
         let new_token = Token(self.token_counter);
         self.token_counter += 1;
+        println!("peer_handler: adding a new stream addr({}) token({})", addr, new_token.0);
         self.streams.insert(new_token, stream);
+        self.addr_to_token.insert(addr, new_token);
         event_loop.register(&self.streams[&new_token], new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
+    }
+
+    fn read(&mut self, token: &Token) -> io::Result<bool> {
+        let mut buffer = [0; 2048];
+        let socket = self.streams.get_mut(&token).unwrap();
+        let bytes_length = try!(socket.read(&mut buffer));
+        println!("peer_handler: got {} bytes of data for token {}", bytes_length, token.0);
+        let data = buffer[0..bytes_length].to_vec();
+        let addr = try!(socket.peer_addr());
+        self.data_channel.send((addr, data)).unwrap();
+        Ok(true)
+    }
+
+    fn disconnect(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: &Token) {
+        event_loop.deregister(&self.streams[token]).unwrap();
+        self.streams.remove(token);  // FIXME: send disconnect back to torrent
     }
 }
 
@@ -85,25 +106,26 @@ impl Handler for PeerHandler {
             match token {
                 SERVER_TOKEN => {
                     println!("peer_handler: accepting a new connection");
-                    let peer_socket = match self.socket.accept() {
-                        Ok(Some((sock, _))) => sock,
+                    let (peer_socket, addr) = match self.socket.accept() {
+                        Ok(Some((sock, addr))) => (sock, addr),
                         Ok(None) => unreachable!(),
                         Err(e) => {
                             println!("peer_server: accept error {}", e);
                             return;
                         }
                     };
-                    self.add_stream(event_loop, peer_socket);
+                    self.add_stream(event_loop, addr, peer_socket);
                 }
                 token => {
                     println!("peer_handler: received data for token {}", token.0);
-                    let socket = self.streams.get_mut(&token).unwrap();
-                    let mut buffer = [0; 2048];
-                    let bytes_length = socket.read(&mut buffer).unwrap();
-                    println!("peer_handler: got {} bytes of data for token {}", bytes_length, token.0);
-                    let data = buffer[0..bytes_length].to_vec();
-                    let addr = socket.peer_addr().unwrap();
-                    self.data_channel.send((addr, data)).unwrap();
+                    match self.read(&token) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            println!("peer_handler: error while reading token({}): {}", token.0, err);
+                            self.disconnect(event_loop, &token);
+                            return;
+                        },
+                    }
                 }
             }
         }
@@ -119,19 +141,15 @@ impl Handler for PeerHandler {
     fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
         match msg {
             Actions::AddPeer(addr) => {
-                println!("peer_handler: adding a new addr {}", addr);
                 let socket = TcpStream::connect(&addr).unwrap();
-                self.add_stream(event_loop, socket);
+                self.add_stream(event_loop, addr.clone(), socket);
             },
             Actions::SendData(addr, data) => {
                 println!("peer_handler: actions: got data for addr {}", addr);
-                for (_, mut socket) in &mut self.streams {
-                    if socket.peer_addr().unwrap() == addr {
-                        let len = socket.write(&data).unwrap();
-                        println!("peer_handler: wrote {} bytes to {}", len , addr);
-                        break;
-                    }
-                }
+                let token = self.addr_to_token.get(&addr).unwrap();
+                let socket = self.streams.get_mut(&token).unwrap();
+                let len = socket.write(&data).unwrap();
+                println!("peer_handler: wrote {} bytes to {}", len , addr);
             },
         }
     }
