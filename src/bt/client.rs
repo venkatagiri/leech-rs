@@ -51,21 +51,7 @@ impl Client {
             }
 
             // Process Peers
-            for (addr, peer) in &mut self.torrent.peers {
-                peer.process_data();
-                // FIXME: disconnect inactive peers
-                if !peer.is_handshake_sent || !peer.is_handshake_received {
-                    continue;
-                }
-
-                peer.send_interested();
-                // FIXME: send keep alive
-
-                if !peer.is_choke_received && self.torrent.seeders.len() < 5 && !self.torrent.seeders.contains_key(&addr) { // FIXME: make the number of seeders configurable
-                    println!("client: adding {} to seeders", addr);
-                    self.torrent.seeders.insert(*addr, peer.clone());
-                }
-            }
+            self.process_peers();
 
             // Process Downloads
             self.process_downloads();
@@ -108,6 +94,24 @@ impl Client {
                 thread::sleep(Duration::from_secs(30 * 60)); // 30 mins
             }
         });
+    }
+
+    fn process_peers(&mut self) {
+        for (addr, peer) in &mut self.torrent.peers {
+            peer.process_data();
+            // FIXME: disconnect inactive peers
+            if !peer.is_handshake_sent || !peer.is_handshake_received {
+                continue;
+            }
+
+            peer.send_interested();
+            // FIXME: send keep alive
+
+            if !peer.is_choke_received && self.torrent.seeders.len() < 5 && !self.torrent.seeders.contains_key(&addr) { // FIXME: make the number of seeders configurable
+                println!("client: adding {} to seeders", addr);
+                self.torrent.seeders.insert(*addr, peer.clone());
+            }
+        }
     }
 
     fn process_downloads(&mut self) {
