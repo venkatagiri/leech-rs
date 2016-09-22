@@ -37,15 +37,13 @@ impl fmt::Display for Hash {
 
 /// Transmutes u32 to byte slice
 pub fn u32_to_byte_slice(input: u32) -> Vec<u8> {
-    let mut data: [u8; 4] = unsafe { mem::transmute::<u32, [u8; 4]>(input) };
-    data.reverse();
+    let data: [u8; 4] = unsafe { mem::transmute::<u32, [u8; 4]>(input.to_be()) };
     data.to_vec()
 }
 
 /// Transmutes u64 to byte slice
 pub fn u64_to_byte_slice(input: u64) -> Vec<u8> {
-    let mut data: [u8; 8] = unsafe { mem::transmute::<u64, [u8; 8]>(input) };
-    data.reverse();
+    let data: [u8; 8] = unsafe { mem::transmute::<u64, [u8; 8]>(input.to_be()) };
     data.to_vec()
 }
 
@@ -53,16 +51,16 @@ pub fn u64_to_byte_slice(input: u64) -> Vec<u8> {
 pub fn byte_slice_to_u64(input: &[u8]) -> u64 {
     let mut val: [u8; 8] = [0; 8];
     val.copy_from_slice(input);
-    val.reverse();
-    unsafe { mem::transmute::<[u8; 8], u64>(val) }
+    let num = unsafe { mem::transmute::<[u8; 8], u64>(val) };
+    u64::from_be(num)
 }
 
 /// Transmutes byte slice to usize
 pub fn byte_slice_to_u32(input: &[u8]) -> u32 {
     let mut val: [u8; 4] = [0; 4];
     val.copy_from_slice(input);
-    val.reverse();
-    unsafe { mem::transmute::<[u8; 4], u32>(val) }
+    let num = unsafe { mem::transmute::<[u8; 4], u32>(val) };
+    u32::from_be(num)
 }
 
 /// Calculate sha1 of a vector
