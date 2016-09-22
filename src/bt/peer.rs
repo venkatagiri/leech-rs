@@ -84,7 +84,6 @@ impl PeerHandler {
         let mut buffer = [0; 2048];
         let socket = self.streams.get_mut(&token).unwrap();
         let bytes_length = try!(socket.read(&mut buffer));
-        println!("peer_handler: got {} bytes of data for token {}", bytes_length, token.0);
         let data = buffer[0..bytes_length].to_vec();
         let addr = try!(socket.peer_addr());
         self.data_channel.send((addr, data)).unwrap();
@@ -103,7 +102,6 @@ impl Handler for PeerHandler {
 
     fn ready(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token, events: EventSet) {
         if events.is_readable() {
-            println!("peer_handler: socket is readable for token {}", token.0);
             match token {
                 SERVER_TOKEN => {
                     println!("peer_handler: accepting a new connection");
@@ -118,7 +116,6 @@ impl Handler for PeerHandler {
                     self.add_stream(event_loop, addr, peer_socket);
                 }
                 token => {
-                    println!("peer_handler: received data for token {}", token.0);
                     match self.read(&token) {
                         Ok(_) => {},
                         Err(err) => {
@@ -132,7 +129,6 @@ impl Handler for PeerHandler {
         }
 
         if events.is_writable() {
-            println!("peer_handler: socket is writable for token {}", token.0);
             let socket = self.streams.get_mut(&token).unwrap();
             let addr = socket.peer_addr().unwrap();
             self.data_channel.send((addr, vec![])).unwrap();
@@ -146,11 +142,9 @@ impl Handler for PeerHandler {
                 self.add_stream(event_loop, addr.clone(), socket);
             },
             Actions::SendData(addr, data) => {
-                println!("peer_handler: actions: got data for addr {}", addr);
                 let token = self.addr_to_token.get(&addr).unwrap();
                 let socket = self.streams.get_mut(&token).unwrap();
-                let len = socket.write(&data).unwrap();
-                println!("peer_handler: wrote {} bytes to {}", len , addr);
+                let _ = socket.write(&data).unwrap();
             },
         }
     }
