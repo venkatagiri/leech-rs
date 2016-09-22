@@ -219,7 +219,7 @@ impl Peer {
             MessageType::UnChoke => self.recv_unchoke(message),
             MessageType::Interested => println!("peer: recv interested"),
             MessageType::UnInterested => println!("peer: recv uninterested"),
-            MessageType::Have => println!("peer: recv have"),
+            MessageType::Have => self.recv_have(message),
             MessageType::Bitfield => self.recv_bitfield(message),
             MessageType::Request => println!("peer: recv request"),
             MessageType::Piece => self.recv_piece(message),
@@ -342,6 +342,16 @@ impl Peer {
             return;
         }
         self.is_choke_received = false;
+    }
+
+    fn recv_have(&mut self, message: &Vec<u8>) {
+        println!("peer: recv_have from {}", self);
+        if message.len() != 9 { // FIXME: check for data in the bytes as well
+            println!("peer: invalid have");
+            return;
+        }
+        let piece = byte_slice_to_u32(&message[5..9]) as usize;
+        self.is_piece_downloaded[piece] = true;
     }
 
     pub fn recv_piece(&mut self, message: &Vec<u8>) {
