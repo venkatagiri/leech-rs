@@ -336,6 +336,7 @@ impl Peer {
         let begin = byte_slice_to_u32(&message[9..13]) as usize;
         let block = message[13..].to_vec();
         self.tpieces.send((index, begin, block)).unwrap();
+        self.blocks_requested -= 1;
     }
 
 }
