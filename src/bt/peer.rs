@@ -213,8 +213,8 @@ impl Peer {
     fn handle_message(&mut self, message: &Vec<u8>) {
         match self.get_message_type(message) {
             MessageType::Handshake => self.recv_handshake(message), //FIXME: implement other types
-            MessageType::KeepAlive => println!("peer: recv keepalive"),
-            MessageType::Choke => println!("peer: recv choke"),
+            MessageType::KeepAlive => self.recv_keepalive(message),
+            MessageType::Choke => self.recv_choke(message),
             MessageType::UnChoke => self.recv_unchoke(message),
             MessageType::Interested => println!("peer: recv interested"),
             MessageType::UnInterested => println!("peer: recv uninterested"),
@@ -241,7 +241,7 @@ impl Peer {
     fn get_message_type(&self, message: &Vec<u8>) -> MessageType {
         if !self.is_handshake_received {
             MessageType::Handshake
-        } else if message.len() == 4 { // FIXME: Check if message has only 0s
+        } else if message.len() == 4 {
             MessageType::KeepAlive
         } else {
             MessageType::from_u8(message[4])
@@ -288,6 +288,15 @@ impl Peer {
         self.blocks_requested += 1;
     }
 
+    fn recv_keepalive(&mut self, message: &Vec<u8>) {
+        println!("peer: recv_keepalive from {}", self);
+        if message.len() != 4 {
+            println!("peer: invalid keepalive");
+            return;
+        }
+        // FIXME: track last ping time
+    }
+
     fn recv_handshake(&mut self, message: &Vec<u8>) {
         println!("peer: recv_handshake from {}", self);
         if message.len() != 68 {
@@ -300,6 +309,15 @@ impl Peer {
             panic!("peer: handshake received is for wrong info hash"); //FIXME: disconnect instead of panic
         }
         self.is_handshake_received = true;
+    }
+
+    fn recv_choke(&mut self, message: &Vec<u8>) {
+        println!("peer: recv_choke from {}", self);
+        if message.len() != 5 { // FIXME: check for data in the bytes as well
+            println!("peer: invalid choke");
+            return;
+        }
+        self.is_choke_received = true;
     }
 
     fn recv_unchoke(&mut self, message: &Vec<u8>) {
