@@ -70,6 +70,25 @@ pub fn sha1(data: &Vec<u8>) -> Vec<u8> {
     m.digest().bytes().to_vec()
 }
 
+/// Get bits from byte slice
+pub fn to_bits(list: &[u8]) -> Vec<u8> {
+    fn get_bits(n: &u8) -> Vec<u8> {
+        let mask: u8 = 0b1000_0000;
+        let mut bits = vec![0; 8];
+        for shift in 0..8 {
+            let bit = n & mask.rotate_right(shift);
+            bits[shift as usize] = bit.count_ones() as u8;
+        }
+        bits
+    }
+
+    let mut bits = vec![];
+    for byte in list {
+        bits.extend_from_slice(&get_bits(byte));
+    }
+    bits
+}
+
 // Peer ID used in messages (FIXME: simpler init)
 pub const MY_PEER_ID: Hash = Hash([b'3', b'1', b'4', b'1', b'5', b'9', b'2', b'6', b'5', b'3', b'5', b'8', b'9', b'7', b'9', b'3', b'2', b'3', b'8', b'5']);
 

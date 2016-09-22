@@ -38,7 +38,7 @@ impl Client {
                 if !self.torrent.peers.contains_key(&addr) {
                     let event_loop_channel = event_loop_channel.clone();
                     let tpieces = tpieces.clone();
-                    let peer = Peer::new(addr, self.torrent.info_hash.clone(), event_loop_channel, tpieces);
+                    let peer = Peer::new(addr, &self.torrent, event_loop_channel, tpieces);
                     self.torrent.peers.insert(addr, peer);
                 }
                 self.torrent.peers.get_mut(&addr).unwrap().read(data);
@@ -130,7 +130,9 @@ impl Client {
             for block in 0..block_count {
                 let size = self.torrent.get_block_size(piece, block);
                 for (_, seeder) in &mut self.torrent.seeders {
-                    // FIXME: check bitfield and only dl from peers who have the piece
+                    if !seeder.is_piece_downloaded[piece] {
+                        continue;
+                    }
 
                     // Request only 1 block from each seeder at a time
                     if seeder.blocks_requested > 0 {
@@ -138,6 +140,7 @@ impl Client {
                     }
 
                     seeder.send_request(piece, block * BLOCK_SIZE, size);
+                    break;
                 }
             }
         }

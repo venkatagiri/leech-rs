@@ -10,6 +10,7 @@ use mio::*;
 use mio::tcp::*;
 
 use bt::utils::*;
+use bt::torrent::*;
 
 // BitTorrent message types
 #[derive(Debug)]
@@ -169,13 +170,14 @@ pub struct Peer {
     pub is_interested_sent: bool,
     pub is_choke_received: bool,
     pub blocks_requested: usize,
+    pub is_piece_downloaded: Vec<bool>,
 }
 
 impl Peer {
-    pub fn new(addr: SocketAddr, h: Hash, chn: Sender<Actions>, t: mpsc::Sender<(usize, usize, Vec<u8>)>) -> Peer {
+    pub fn new(addr: SocketAddr, torrent: &Torrent, chn: Sender<Actions>, t: mpsc::Sender<(usize, usize, Vec<u8>)>) -> Peer {
         let mut p = Peer {
             addr: addr,
-            info_hash: h,
+            info_hash: torrent.info_hash.clone(),
             channel: chn,
             tpieces: t,
             data: vec![],
@@ -184,6 +186,7 @@ impl Peer {
             is_interested_sent: false,
             is_choke_received: true,
             blocks_requested: 0,
+            is_piece_downloaded: vec![false; torrent.no_of_pieces],
         };
         p.send_handshake();
         p
@@ -198,8 +201,6 @@ impl Peer {
     }
 
     pub fn process_data(&mut self) {
-        //println!("peer: data(size={}) - {:?}", self.data.len(), self.data);
-
         loop {
             let message_length: usize = self.get_message_length(&self.data) as usize;
             if self.data.len() < message_length {
@@ -219,7 +220,7 @@ impl Peer {
             MessageType::Interested => println!("peer: recv interested"),
             MessageType::UnInterested => println!("peer: recv uninterested"),
             MessageType::Have => println!("peer: recv have"),
-            MessageType::Bitfield => println!("peer: recv bitfield"),
+            MessageType::Bitfield => self.recv_bitfield(message),
             MessageType::Request => println!("peer: recv request"),
             MessageType::Piece => self.recv_piece(message),
             MessageType::Cancel => println!("peer: recv cancel"),
@@ -285,7 +286,7 @@ impl Peer {
         data.extend_from_slice(&length);
 
         self.write(data);
-        self.blocks_requested += 1;
+        self.blocks_requested = 1;
     }
 
     fn recv_keepalive(&mut self, message: &Vec<u8>) {
@@ -320,6 +321,20 @@ impl Peer {
         self.is_choke_received = true;
     }
 
+    fn recv_bitfield(&mut self, message: &Vec<u8>) {
+        println!("peer: recv_bitfield from {}", self);
+        let no_of_pieces = self.is_piece_downloaded.len();
+        let expected_length: usize = (no_of_pieces/8) + 1;
+        if message.len() != expected_length + 5 {
+            println!("peer: invalid bitfield length");
+            return;
+        }
+        let bits = to_bits(&message[5..]);
+        for piece in 0..no_of_pieces {
+            self.is_piece_downloaded[piece] = if bits[piece] == 1 { true } else { false };
+        }
+    }
+
     fn recv_unchoke(&mut self, message: &Vec<u8>) {
         println!("peer: recv_unchoke from {}", self);
         if message.len() != 5 { // FIXME: check for data in the bytes as well
@@ -336,7 +351,7 @@ impl Peer {
         let begin = byte_slice_to_u32(&message[9..13]) as usize;
         let block = message[13..].to_vec();
         self.tpieces.send((index, begin, block)).unwrap();
-        self.blocks_requested -= 1;
+        self.blocks_requested = 0;
     }
 
 }
