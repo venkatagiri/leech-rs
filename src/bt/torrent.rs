@@ -66,11 +66,11 @@ impl Torrent {
         let pieces = try!(info.get_bytes("pieces"));
 
         // Split the pieces into 20 byte sha1 hashes
-        let hashes: Vec<Hash> = pieces.chunks(20).map(|chunk| {
-            let mut h = Hash([0; 20]); // FIXME: figure out simpler way to do this
-            h.0.clone_from_slice(chunk);
-            h
-        }).collect();
+        let hashes: Vec<Hash> =
+            pieces
+            .chunks(20)
+            .map(|chunk| { Hash::from_slice(chunk) })
+            .collect();
         let no_of_pieces = hashes.len();
 
         // Parse files list from the info
@@ -114,8 +114,8 @@ impl Torrent {
 
         let mut t = Torrent {
             name: name,
-            info_hash: Hash::from_vec(&info_hash),
-            tracker: Tracker::new(tracker_list, Hash::from_vec(&info_hash)),
+            info_hash: Hash::from_slice(&info_hash),
+            tracker: Tracker::new(tracker_list, Hash::from_slice(&info_hash)),
             piece_size: piece_size,
             pieces_hashes: hashes,
             files: file_items,
@@ -166,7 +166,7 @@ impl Torrent {
     fn verify_piece(&mut self, piece: usize) {
         let data = self.read_piece(piece);
         let sha1 = sha1(&data);
-        let hash = Hash::from_vec(&sha1);
+        let hash = Hash::from_slice(&sha1);
         if self.pieces_hashes.get(piece) == Some(&hash) {
             self.is_piece_downloaded[piece] = true;
             if self.is_complete() {

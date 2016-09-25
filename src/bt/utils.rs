@@ -13,7 +13,7 @@ impl Hash {
       self.0.to_hex().as_bytes().chunks(2).map(|h| format!("%{}{}", h[0] as char, h[1] as char) ).collect::<Vec<String>>().join("")
     }
 
-    pub fn from_vec(h: &Vec<u8>) -> Hash {
+    pub fn from_slice(h: &[u8]) -> Hash {
         let mut bhash: [u8; 20] = [0; 20];
         bhash.copy_from_slice(h);
         Hash(bhash)
