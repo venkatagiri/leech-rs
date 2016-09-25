@@ -49,7 +49,6 @@ pub enum Actions {
 }
 
 pub const SERVER_TOKEN: Token = Token(0);
-pub const TIMER_TOKEN: Token = Token(1);
 
 // Handler for the event loop
 pub struct PeerHandler {

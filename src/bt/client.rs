@@ -71,7 +71,6 @@ impl Client {
         let mut handler = PeerHandler::new(server_socket, sender);
 
         event_loop.register(&handler.socket, SERVER_TOKEN, EventSet::readable(), PollOpt::edge()).unwrap();
-        event_loop.timeout_ms(TIMER_TOKEN, 5000).unwrap();
         thread::spawn(move || {
             event_loop.run(&mut handler).unwrap();
         });
