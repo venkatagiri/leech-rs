@@ -73,17 +73,31 @@ impl PeerHandler {
     fn add_stream(&mut self, event_loop: &mut EventLoop<PeerHandler>, addr: SocketAddr, stream: TcpStream) {
         let new_token = Token(self.token_counter);
         self.token_counter += 1;
-        println!("peer_handler: adding a new stream addr({}) token({})", addr, new_token.0);
         self.streams.insert(new_token, stream);
         self.addr_to_token.insert(addr, new_token);
         event_loop.register(&self.streams[&new_token], new_token, EventSet::readable() | EventSet::writable(), PollOpt::edge()).unwrap();
+        println!("peer_handler: new stream registered with addr({}) token({})", addr, new_token.0);
     }
 
     fn read(&mut self, token: &Token) -> io::Result<bool> {
+        let mut data = vec![];
         let mut buffer = [0; 2048];
         let socket = self.streams.get_mut(&token).unwrap();
-        let bytes_length = try!(socket.read(&mut buffer));
-        let data = buffer[0..bytes_length].to_vec();
+        loop {
+            match socket.try_read(&mut buffer) {
+                Err(e) => {
+                    println!("peer_handler: error while reading socket {}", e);
+                    return Ok(false);
+                },
+                Ok(None) => {
+                    // socket buffer has got no more bytes
+                    break;
+                },
+                Ok(Some(len)) => {
+                    data.extend_from_slice(&buffer[0..len]);
+                }
+            }
+        }
         let addr = try!(socket.peer_addr());
         self.data_channel.send((addr, data)).unwrap();
         Ok(true)
