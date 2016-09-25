@@ -196,6 +196,11 @@ impl Torrent {
             if (start < file.offset && end < file.offset) || (start > file.offset + file.length && end > file.offset + file.length) {
                 continue;
             }
+
+            if !Path::new(&file.path).exists() {
+                return vec![];
+            }
+
             let fstart = cmp::max(0, start - file.offset);
             let fend = cmp::min(end - file.offset, file.length);
             let flength = fend - fstart;
