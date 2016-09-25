@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::net::SocketAddr;
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs;
 use std::cmp;
 use std::io::{
     Seek,
@@ -157,7 +157,15 @@ impl Torrent {
             let bstart = cmp::max(0, (file.offset as i32 - start as i32).abs()) as usize;
             let bend = bstart + flength;
 
-            let mut f = OpenOptions::new().read(true).write(true).create(true).open(&file.path).unwrap();
+            // Create directories in the file path if they don't exist
+            if let Some(dirs) = Path::new(&file.path).parent() {
+                if let Err(err) = fs::create_dir_all(dirs) {
+                    println!("torrent: create dir({:?}) failed with error {}", dirs, err);
+                    return;
+                };
+            }
+
+            let mut f = fs::OpenOptions::new().read(true).write(true).create(true).open(&file.path).unwrap();
             f.seek(SeekFrom::Start(fstart as u64)).unwrap();
             f.write(&data[bstart..bend]).unwrap();
         }
@@ -193,7 +201,7 @@ impl Torrent {
             let flength = fend - fstart;
             let mut buffer = vec![0; flength];
 
-            let mut f = OpenOptions::new().read(true).open(&file.path).unwrap();
+            let mut f = fs::OpenOptions::new().read(true).open(&file.path).unwrap();
             f.seek(SeekFrom::Start(fstart as u64)).unwrap();
             f.read_exact(&mut buffer).unwrap();
 
