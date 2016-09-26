@@ -56,7 +56,7 @@ impl Client {
             // Process Downloads
             self.process_downloads();
 
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_millis(314));
         }
     }
 
