@@ -151,6 +151,9 @@ impl Handler for PeerHandler {
     fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
         match msg {
             Actions::AddPeer(addr) => {
+                if self.addr_to_token.contains_key(&addr) {
+                    return;
+                }
                 let socket = TcpStream::connect(&addr).unwrap();
                 self.add_stream(event_loop, addr.clone(), socket);
             },
