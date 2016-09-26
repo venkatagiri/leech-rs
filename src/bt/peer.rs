@@ -22,7 +22,7 @@ pub enum MessageType {
     Choke = 0,
     UnChoke = 1,
     Interested = 2,
-    UnInterested = 3,
+    NotInterested = 3,
     Have = 4,
     Bitfield = 5,
     Request = 6,
@@ -232,7 +232,7 @@ impl Peer {
             MessageType::Choke => self.recv_choke(message),
             MessageType::UnChoke => self.recv_unchoke(message),
             MessageType::Interested => println!("peer: recv interested"),
-            MessageType::UnInterested => println!("peer: recv uninterested"),
+            MessageType::NotInterested => println!("peer: recv not interested"),
             MessageType::Have => self.recv_have(message),
             MessageType::Bitfield => self.recv_bitfield(message),
             MessageType::Request => println!("peer: recv request"),
@@ -293,6 +293,17 @@ impl Peer {
 
         self.write(data);
         self.is_interested_sent = true;
+    }
+
+    pub fn send_not_interested(&mut self) {
+        if !self.is_interested_sent {
+            return;
+        }
+        println!("peer: send_not_interested to {}", self);
+        let data: Vec<u8> = vec![0, 0, 0, 1, 3];
+
+        self.write(data);
+        self.is_interested_sent = false;
     }
 
     pub fn send_request(&mut self, index: usize, begin: usize, length: usize) {

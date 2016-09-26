@@ -96,6 +96,7 @@ impl Client {
     }
 
     fn process_peers(&mut self) {
+        let is_complete = self.torrent.is_complete();
         for (addr, peer) in &mut self.torrent.peers {
             peer.process_data();
             // FIXME: disconnect inactive peers
@@ -103,10 +104,18 @@ impl Client {
                 continue;
             }
 
-            peer.send_interested();
+            if is_complete {
+                peer.send_not_interested();
+            } else {
+                peer.send_interested();
+            }
             // FIXME: send keep alive
 
-            if !peer.is_choke_received && self.torrent.seeders.len() < 5 && !self.torrent.seeders.contains(&addr) { // FIXME: make the number of seeders configurable
+            if !is_complete
+                && !peer.is_choke_received
+                && self.torrent.seeders.len() < 7
+                && !self.torrent.seeders.contains(&addr)
+            { // FIXME: make the number of seeders configurable
                 println!("client: adding {} to seeders", addr);
                 self.torrent.seeders.push(*addr);
             }
