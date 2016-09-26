@@ -188,6 +188,9 @@ impl Torrent {
             for peer in self.peers.values_mut() {
                 peer.send_have(piece);
             }
+        } else {
+            self.is_piece_downloaded[piece] = false;
+            self.is_block_downloaded[piece] = vec![false; self.get_block_count(piece)];
         }
     }
 
