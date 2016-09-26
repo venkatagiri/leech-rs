@@ -129,6 +129,7 @@ impl Torrent {
         for piece in 0..t.no_of_pieces {
             let block_count = t.get_block_count(piece);
             t.is_block_downloaded.push(vec![false; block_count]);
+            t.verify_piece(piece);
         }
         Ok(t)
     }
