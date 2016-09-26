@@ -135,7 +135,13 @@ impl Torrent {
     }
 
     pub fn write_block(&mut self, piece: usize, block: usize, data: Vec<u8>) {
-        self.write(piece * self.piece_size + block * BLOCK_SIZE, data);
+        match self.write(piece * self.piece_size + block * BLOCK_SIZE, data) {
+            Ok(_) => {},
+            Err(err) => {
+                println!("torrent: error occured while writing a block {}", err);
+                return;
+            },
+        }
         self.is_block_downloaded[piece][block] = true;
 
         let block_count = self.get_block_count(piece);
@@ -145,7 +151,7 @@ impl Torrent {
         }
     }
 
-    fn write(&self, start: usize, data: Vec<u8>) {
+    fn write(&self, start: usize, data: Vec<u8>) -> io::Result<bool> {
         let end = start + data.len();
         for file in &self.files {
             if (start < file.offset && end < file.offset) || (start > file.offset + file.length && end > file.offset + file.length) {
@@ -159,16 +165,14 @@ impl Torrent {
 
             // Create directories in the file path if they don't exist
             if let Some(dirs) = Path::new(&file.path).parent() {
-                if let Err(err) = fs::create_dir_all(dirs) {
-                    println!("torrent: create dir({:?}) failed with error {}", dirs, err);
-                    return;
-                };
+                try!(fs::create_dir_all(dirs));
             }
 
-            let mut f = fs::OpenOptions::new().read(true).write(true).create(true).open(&file.path).unwrap();
-            f.seek(SeekFrom::Start(fstart as u64)).unwrap();
-            f.write(&data[bstart..bend]).unwrap();
+            let mut f = try!(fs::OpenOptions::new().read(true).write(true).create(true).open(&file.path));
+            try!(f.seek(SeekFrom::Start(fstart as u64)));
+            try!(f.write(&data[bstart..bend]));
         }
+        Ok(true)
     }
 
     fn verify_piece(&mut self, piece: usize) {
