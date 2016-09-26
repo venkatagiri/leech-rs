@@ -306,6 +306,16 @@ impl Peer {
         self.is_interested_sent = false;
     }
 
+    pub fn send_have(&mut self, piece: usize) {
+        println!("peer: send_have to {}", self);
+        let piece = u32_to_byte_slice(piece as u32);
+
+        let mut data: Vec<u8> = vec![0, 0, 0, 5, 4];
+        data.extend_from_slice(&piece);
+
+        self.write(data);
+    }
+
     pub fn send_request(&mut self, index: usize, begin: usize, length: usize) {
         println!("peer: send_request to {}", self);
 

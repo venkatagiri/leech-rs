@@ -181,9 +181,12 @@ impl Torrent {
         if self.pieces_hashes.get(piece) == Some(&hash) {
             self.is_piece_downloaded[piece] = true;
             self.is_block_downloaded[piece] = vec![true; self.get_block_count(piece)];
-            // FIXME: send have piece to all peers
             if self.is_complete() {
                 println!("client: torrent download is complete");
+            }
+            // send Have messages when a piece is verified
+            for peer in self.peers.values_mut() {
+                peer.send_have(piece);
             }
         }
     }
