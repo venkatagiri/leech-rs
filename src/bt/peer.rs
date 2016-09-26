@@ -85,10 +85,7 @@ impl PeerHandler {
         let socket = self.streams.get_mut(&token).unwrap();
         loop {
             match socket.try_read(&mut buffer) {
-                Err(e) => {
-                    println!("peer_handler: error while reading socket {}", e);
-                    return Ok(false);
-                },
+                Err(err) => return Err(err),
                 Ok(None) => {
                     // socket buffer has got no more bytes
                     break;
