@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::cmp;
 use std::io::{
+    self,
     Seek,
     SeekFrom,
     Write,
@@ -34,9 +35,9 @@ pub struct Torrent {
     pub files: Vec<FileItem>,
     pub no_of_pieces: usize,
     pub is_piece_downloaded: Vec<bool>,
-    pub is_block_downloaded: HashMap<usize, Vec<bool>>,
+    pub is_block_downloaded: Vec<Vec<bool>>,
     pub peers: HashMap<SocketAddr, Peer>,
-    pub seeders: HashMap<SocketAddr, Peer>,
+    pub seeders: Vec<SocketAddr>,
 }
 
 impl Torrent {
@@ -121,23 +122,21 @@ impl Torrent {
             files: file_items,
             no_of_pieces: no_of_pieces,
             is_piece_downloaded: vec![false; no_of_pieces as usize],
-            is_block_downloaded: HashMap::new(),
+            is_block_downloaded: vec![],
             peers: HashMap::new(),
-            seeders: HashMap::new(),
+            seeders: vec![],
         };
         for piece in 0..t.no_of_pieces {
             let block_count = t.get_block_count(piece);
-            t.is_block_downloaded.insert(piece, vec![false; block_count]);
+            t.is_block_downloaded.push(vec![false; block_count]);
         }
         Ok(t)
     }
 
     pub fn write_block(&mut self, piece: usize, block: usize, data: Vec<u8>) {
         self.write(piece * self.piece_size + block * BLOCK_SIZE, data);
-        {
-            let b_blocks = self.is_block_downloaded.get_mut(&piece).unwrap();
-            b_blocks[block] = true;
-        }
+        self.is_block_downloaded[piece][block] = true;
+
         let block_count = self.get_block_count(piece);
         let completed_block_count = self.get_completed_block_count(piece);
         if block_count == completed_block_count {
@@ -154,7 +153,7 @@ impl Torrent {
             let fstart = cmp::max(0, start - file.offset);
             let fend = cmp::min(end - file.offset, file.length);
             let flength = fend - fstart;
-            let bstart = cmp::max(0, (file.offset as i32 - start as i32).abs()) as usize;
+            let bstart = cmp::max(0, file.offset as i64 - start as i64) as usize;
             let bend = bstart + flength;
 
             // Create directories in the file path if they don't exist
@@ -172,22 +171,36 @@ impl Torrent {
     }
 
     fn verify_piece(&mut self, piece: usize) {
-        let data = self.read_piece(piece);
+        let data = match self.read_piece(piece) {
+            Ok(data) => data,
+            Err(_) => return,
+        };
         let sha1 = sha1(&data);
         let hash = Hash::from_slice(&sha1);
         if self.pieces_hashes.get(piece) == Some(&hash) {
             self.is_piece_downloaded[piece] = true;
+            self.is_block_downloaded[piece] = vec![true; self.get_block_count(piece)];
+            // FIXME: send have piece to all peers
             if self.is_complete() {
                 println!("client: torrent download is complete");
             }
         }
     }
 
+    pub fn is_block_requested(&self, piece: usize, block: usize) -> bool {
+        for peer in self.peers.values() {
+            if peer.is_block_requested[piece][block] {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn is_complete(&self) -> bool {
         self.get_completed_piece_count() == self.no_of_pieces
     }
 
-    fn read_piece(&self, piece: usize) -> Vec<u8> {
+    fn read_piece(&self, piece: usize) -> io::Result<Vec<u8>> {
         let start = piece * self.piece_size;
         let end = cmp::min(self.get_total_size(), (piece + 1) * self.piece_size);
         let mut data = vec![];
@@ -197,31 +210,27 @@ impl Torrent {
                 continue;
             }
 
-            if !Path::new(&file.path).exists() {
-                return vec![];
-            }
-
             let fstart = cmp::max(0, start - file.offset);
             let fend = cmp::min(end - file.offset, file.length);
             let flength = fend - fstart;
             let mut buffer = vec![0; flength];
 
-            let mut f = fs::OpenOptions::new().read(true).open(&file.path).unwrap();
-            f.seek(SeekFrom::Start(fstart as u64)).unwrap();
-            f.read_exact(&mut buffer).unwrap();
+            let mut f = try!(fs::OpenOptions::new().read(true).open(&file.path));
+            try!(f.seek(SeekFrom::Start(fstart as u64)));
+            try!(f.read_exact(&mut buffer));
 
             data.extend_from_slice(&buffer);
         }
 
-        data
+        Ok(data)
     }
 
     pub fn get_block_count(&self, piece: usize) -> usize {
-        (self.get_piece_size(piece) / BLOCK_SIZE) + 1
+        (self.get_piece_size(piece) as f32 / BLOCK_SIZE as f32).ceil() as usize
     }
 
     fn get_completed_block_count(&self, piece: usize) -> usize {
-        self.is_block_downloaded.get(&piece).unwrap().iter().map(|b| { if *b == true { 1 } else { 0 } }).fold(0, |sum, x| sum + x)
+        self.is_block_downloaded[piece].iter().map(|b| { if *b == true { 1 } else { 0 } }).fold(0, |sum, x| sum + x)
     }
 
     fn get_completed_piece_count(&self) -> usize {

@@ -178,6 +178,7 @@ pub struct Peer {
     pub is_choke_received: bool,
     pub blocks_requested: usize,
     pub is_piece_downloaded: Vec<bool>,
+    pub is_block_requested: Vec<Vec<bool>>,
 }
 
 impl Peer {
@@ -194,6 +195,9 @@ impl Peer {
             is_choke_received: true,
             blocks_requested: 0,
             is_piece_downloaded: vec![false; torrent.no_of_pieces],
+            is_block_requested: {
+                (0..torrent.no_of_pieces).map(|piece| { vec![false; torrent.get_block_count(piece)] }).collect()
+            },
         };
         p.send_handshake();
         p
@@ -256,6 +260,14 @@ impl Peer {
         }
     }
 
+    pub fn no_of_blocks_requested(&self) -> u32 {
+        self.is_block_requested
+            .iter()
+            .fold(0, |sum, ref x| {
+                sum + x.iter().filter(|&b| *b ).collect::<Vec<_>>().len() as u32
+            })
+    }
+
     fn send_handshake(&mut self) {
         println!("peer: send_handshake to {}", self);
         let mut data: Vec<u8> = vec![];
@@ -280,10 +292,12 @@ impl Peer {
         self.is_interested_sent = true;
     }
 
-    pub fn send_request(&mut self, piece: usize, begin: usize, length: usize) {
+    pub fn send_request(&mut self, index: usize, begin: usize, length: usize) {
         println!("peer: send_request to {}", self);
 
-        let index = u32_to_byte_slice(piece as u32);
+        let piece = index;
+        let block = begin / BLOCK_SIZE;
+        let index = u32_to_byte_slice(index as u32);
         let begin = u32_to_byte_slice(begin as u32);
         let length = u32_to_byte_slice(length as u32);
 
@@ -293,7 +307,7 @@ impl Peer {
         data.extend_from_slice(&length);
 
         self.write(data);
-        self.blocks_requested = 1;
+        self.is_block_requested[piece][block] = true;
     }
 
     fn recv_keepalive(&mut self, message: &Vec<u8>) {
@@ -367,8 +381,11 @@ impl Peer {
         let index = byte_slice_to_u32(&message[5..9]) as usize;
         let begin = byte_slice_to_u32(&message[9..13]) as usize;
         let block = message[13..].to_vec();
-        self.tpieces.send((index, begin, block)).unwrap();
-        self.blocks_requested = 0;
+        self.tpieces.send((index, begin / BLOCK_SIZE, block)).unwrap();
+
+        let piece = index;
+        let block = begin / BLOCK_SIZE;
+        self.is_block_requested[piece][block] = false;
     }
 
 }

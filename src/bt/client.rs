@@ -44,14 +44,14 @@ impl Client {
                 self.torrent.peers.get_mut(&addr).unwrap().read(data);
             }
 
+            // Process Peers
+            self.process_peers();
+
             // Write received blocks/pieces to files
             while let Ok(packet) = rpieces.try_recv() {
                 let (piece, begin, block) = packet;
                 self.torrent.write_block(piece, begin, block);
             }
-
-            // Process Peers
-            self.process_peers();
 
             // Process Downloads
             self.process_downloads();
@@ -106,9 +106,9 @@ impl Client {
             peer.send_interested();
             // FIXME: send keep alive
 
-            if !peer.is_choke_received && self.torrent.seeders.len() < 5 && !self.torrent.seeders.contains_key(&addr) { // FIXME: make the number of seeders configurable
+            if !peer.is_choke_received && self.torrent.seeders.len() < 5 && !self.torrent.seeders.contains(&addr) { // FIXME: make the number of seeders configurable
                 println!("client: adding {} to seeders", addr);
-                self.torrent.seeders.insert(*addr, peer.clone());
+                self.torrent.seeders.push(*addr);
             }
         }
     }
@@ -127,14 +127,24 @@ impl Client {
             let block_count = self.torrent.get_block_count(piece);
             // Go through the seeders and request pieces
             for block in 0..block_count {
+                // Skip if the block is already downloaded
+                if self.torrent.is_block_downloaded[piece][block] {
+                    continue;
+                }
+
+                // Skip if the block is already requested
+                if self.torrent.is_block_requested(piece, block) {
+                    continue;
+                }
+
                 let size = self.torrent.get_block_size(piece, block);
-                for (_, seeder) in &mut self.torrent.seeders {
+                for addr in &mut self.torrent.seeders {
+                    let seeder = self.torrent.peers.get_mut(addr).unwrap();
                     if !seeder.is_piece_downloaded[piece] {
                         continue;
                     }
 
-                    // Request only 1 block from each seeder at a time
-                    if seeder.blocks_requested > 0 {
+                    if seeder.no_of_blocks_requested() > 0 {
                         continue;
                     }
 
