@@ -90,9 +90,14 @@ impl PeerHandler {
                     // socket buffer has got no more bytes
                     break;
                 },
-                Ok(Some(len)) => {
+                Ok(Some(len)) if len <= 0 => {
+                    // socket buffer has got no more bytes
+                    break;
+                },
+                Ok(Some(len)) if len > 0 => {
                     data.extend_from_slice(&buffer[0..len]);
                 }
+                Ok(Some(_)) => unreachable!(),
             }
         }
         let addr = try!(socket.peer_addr());
