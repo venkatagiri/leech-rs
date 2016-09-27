@@ -89,6 +89,20 @@ pub fn to_bits(list: &[u8]) -> Vec<u8> {
     bits
 }
 
+/// Get byte slice from bits
+pub fn from_bits(bits: &[u8]) -> Vec<u8> {
+    bits.chunks(8).map(|byte| {
+        let mut res: u8 = 0b0000_0000;
+        let mask: u8 = 0b1000_0000;
+        for shift in 0..byte.len() {
+            if byte[shift] == 1 {
+                res = res | mask.rotate_right(shift as u32);
+            }
+        }
+        res
+    }).collect()
+}
+
 // Peer ID used in messages (FIXME: simpler init)
 pub const MY_PEER_ID: Hash = Hash([b'3', b'1', b'4', b'1', b'5', b'9', b'2', b'6', b'5', b'3', b'5', b'8', b'9', b'7', b'9', b'3', b'2', b'3', b'8', b'5']);
 

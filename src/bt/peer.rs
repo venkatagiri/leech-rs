@@ -184,6 +184,7 @@ pub struct Peer {
     pub blocks_requested: usize,
     pub is_piece_downloaded: Vec<bool>,
     pub is_block_requested: Vec<Vec<bool>>,
+    bitfield: Vec<bool>,
 }
 
 impl Peer {
@@ -203,6 +204,7 @@ impl Peer {
             is_block_requested: {
                 (0..torrent.no_of_pieces).map(|piece| { vec![false; torrent.get_block_count(piece)] }).collect()
             },
+            bitfield: torrent.is_piece_downloaded.clone(),
         };
         p.send_handshake();
         p
@@ -318,6 +320,21 @@ impl Peer {
         self.write(data);
     }
 
+    pub fn send_bitfield(&mut self) {
+        println!("peer: send_bitfield to {}", self);
+
+        let bits: Vec<u8> = self.bitfield.iter().map(|&b| { if b { 1 } else { 0 } }).collect();
+        let bitfield = from_bits(&bits);
+        let length = bitfield.len() as u32 + 1;
+
+        let mut data: Vec<u8> = vec![];
+        data.extend_from_slice(&u32_to_byte_slice(length));
+        data.push(5);
+        data.extend_from_slice(&bitfield);
+
+        self.write(data);
+    }
+
     pub fn send_request(&mut self, index: usize, begin: usize, length: usize) {
         println!("peer: send_request to {}", self);
 
@@ -357,6 +374,7 @@ impl Peer {
             panic!("peer: handshake received is for wrong info hash"); //FIXME: disconnect instead of panic
         }
         self.is_handshake_received = true;
+        self.send_bitfield();
     }
 
     fn recv_choke(&mut self, message: &Vec<u8>) {
