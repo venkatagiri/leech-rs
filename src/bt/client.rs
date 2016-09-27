@@ -99,7 +99,12 @@ impl Client {
         let is_complete = self.torrent.is_complete();
         for (addr, peer) in &mut self.torrent.peers {
             peer.process_data();
-            // FIXME: disconnect inactive peers
+
+            if peer.is_timed_out() {
+                //FIXME: disconnect the peer
+                continue;
+            }
+
             if !peer.is_handshake_sent || !peer.is_handshake_received {
                 continue;
             }
@@ -109,7 +114,8 @@ impl Client {
             } else {
                 peer.send_interested();
             }
-            // FIXME: send keep alive
+
+            peer.send_keepalive();
 
             if !is_complete
                 && !peer.is_choke_received

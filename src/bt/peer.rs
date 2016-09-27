@@ -5,6 +5,7 @@ use std::fmt;
 use std::mem;
 use std::collections::HashMap;
 use std::sync::mpsc;
+use std::time::Instant;
 
 use mio::*;
 use mio::tcp::*;
@@ -177,6 +178,8 @@ pub struct Peer {
     tpieces: mpsc::Sender<(usize, usize, Vec<u8>)>,
 
     data: Vec<u8>,
+    last_active: Instant,
+    last_keepalive: Instant,
     pub is_handshake_received: bool,
     pub is_handshake_sent: bool,
     pub is_interested_sent: bool,
@@ -195,6 +198,8 @@ impl Peer {
             channel: chn,
             tpieces: t,
             data: vec![],
+            last_active: Instant::now(),
+            last_keepalive: Instant::now(),
             is_handshake_received: false,
             is_handshake_sent: false,
             is_interested_sent: false,
@@ -230,6 +235,8 @@ impl Peer {
     }
 
     fn handle_message(&mut self, message: &Vec<u8>) {
+        self.last_active = Instant::now();
+
         match self.get_message_type(message) {
             MessageType::Handshake => self.recv_handshake(message), //FIXME: implement other types
             MessageType::KeepAlive => self.recv_keepalive(message),
@@ -275,6 +282,10 @@ impl Peer {
             })
     }
 
+    pub fn is_timed_out(&self) -> bool {
+        self.last_active.elapsed().as_secs() > 30
+    }
+
     fn send_handshake(&mut self) {
         println!("peer: send_handshake to {}", self);
         let mut data: Vec<u8> = vec![];
@@ -286,6 +297,17 @@ impl Peer {
 
         self.write(data);
         self.is_handshake_sent = true;
+    }
+
+    pub fn send_keepalive(&mut self) {
+        if self.last_keepalive.elapsed().as_secs() < 30 {
+            return;
+        }
+        println!("peer: send_keepalive to {}", self);
+
+        let data: Vec<u8> = vec![0; 4];
+        self.write(data);
+        self.last_keepalive = Instant::now();
     }
 
     pub fn send_interested(&mut self) {
@@ -359,7 +381,6 @@ impl Peer {
             println!("peer: invalid keepalive");
             return;
         }
-        // FIXME: track last ping time
     }
 
     fn recv_handshake(&mut self, message: &Vec<u8>) {
