@@ -1,4 +1,7 @@
-use std::io::{Read, Result};
+use std::io::{
+    Read,
+    Result,
+};
 use std::fmt;
 use std::string::String;
 use std::str::FromStr;
@@ -52,20 +55,20 @@ impl HTTPTracker {
 struct UDPTracker {}
 
 impl UDPTracker {
-    fn get_addr_from_url(url: &String) -> SocketAddr {
+    fn get_addr_from_url(url: &String) -> Result<SocketAddr> {
         let parts: Vec<_> = url.split("/").collect();
         let addr = parts[2];
-        let addrs: Vec<_> = addr.to_socket_addrs().expect("domain resolution failed!").collect();
-        addrs.first().expect("domain resolution failed").clone()
+        let addrs: Vec<_> = try!(addr.to_socket_addrs()).collect();
+        Ok(addrs[0])
     }
 
     fn get_peers_addresses(url: &String, info_hash: &Hash) -> Result<Vec<SocketAddr>> {
-        let addr = Self::get_addr_from_url(url);
-        let mut socket = UdpSocket::bind("0.0.0.0:55555").expect("udp bind failed");
+        let addr = try!(Self::get_addr_from_url(url));
+        let mut socket = try!(UdpSocket::bind("0.0.0.0:55555"));
         try!(socket.connect(addr));
 
-        socket.set_read_timeout(Some(Duration::from_secs(1))).expect("udp read timeout failed");
-        socket.set_write_timeout(Some(Duration::from_secs(1))).expect("udp write timeout failed");
+        try!(socket.set_read_timeout(Some(Duration::from_secs(1))));
+        try!(socket.set_write_timeout(Some(Duration::from_secs(1))));
 
         let _ = try!(Self::send_connect(&mut socket));
         let connection_id = try!(Self::recv_connect(&mut socket));
