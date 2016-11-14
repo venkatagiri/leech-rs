@@ -159,7 +159,7 @@ impl Torrent {
             if (start < file.offset && end < file.offset) || (start > file.offset + file.length && end > file.offset + file.length) {
                 continue;
             }
-            let fstart = cmp::max(0, start - file.offset);
+            let fstart = cmp::max(0, start as i64 - file.offset as i64) as usize;
             let fend = cmp::min(end - file.offset, file.length);
             let flength = fend - fstart;
             let bstart = cmp::max(0, file.offset as i64 - start as i64) as usize;
@@ -223,7 +223,7 @@ impl Torrent {
                 continue;
             }
 
-            let fstart = cmp::max(0, start - file.offset);
+            let fstart = cmp::max(0, start as i64 - file.offset as i64) as usize;
             let fend = cmp::min(end - file.offset, file.length);
             let flength = fend - fstart;
             let mut buffer = vec![0; flength];
