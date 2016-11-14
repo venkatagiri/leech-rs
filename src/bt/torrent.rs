@@ -54,7 +54,9 @@ impl Torrent {
         let name = try!(info.get_str("name"));
 
         let mut tracker_list = vec![];
-        tracker_list.push(try!(root.get_str("announce")));
+        if let Ok(tracker) = root.get_str("announce") {
+            tracker_list.push(tracker);
+        }
         if let Ok(announce_list) = root.get_list("announce-list") {
             for list in announce_list {
                 for tracker in try!(list.to_list()) {
