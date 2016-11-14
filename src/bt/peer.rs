@@ -47,6 +47,7 @@ impl MessageType {
 pub enum Actions {
     AddPeer(SocketAddr),
     SendData(SocketAddr, Vec<u8>),
+    Disconnect(SocketAddr),
 }
 
 pub const SERVER_TOKEN: Token = Token(0);
@@ -165,6 +166,13 @@ impl Handler for PeerHandler {
                 let socket = self.streams.get_mut(&token).unwrap();
                 let _ = socket.write(&data).unwrap();
             },
+            Actions::Disconnect(addr) => {
+                if !self.addr_to_token.contains_key(&addr) {
+                    return;
+                }
+                let token = self.addr_to_token.get(&addr).unwrap().clone();
+                self.disconnect(event_loop, &token);
+            },
         }
     }
 }
@@ -221,6 +229,10 @@ impl Peer {
 
     fn write(&self, data: Vec<u8>) {
         self.channel.send(Actions::SendData(self.addr, data)).unwrap();
+    }
+
+    fn disconnect(&self) {
+        self.channel.send(Actions::Disconnect(self.addr)).unwrap();
     }
 
     pub fn process_data(&mut self) {
@@ -386,13 +398,15 @@ impl Peer {
     fn recv_handshake(&mut self, message: &Vec<u8>) {
         println!("peer: recv_handshake from {}", self);
         if message.len() != 68 {
-            panic!("peer: handshake should always be of length 68"); //FIXME: disconnect instead of panic
+            println!("peer: invalid handshake");
+            self.disconnect();
+            return;
         }
-        let mut bhash = [0; 20];
-        bhash.copy_from_slice(&message[28..48]);
-        let hash = Hash(bhash); //FIXME: simpler init
+        let hash = Hash::from_slice(&message[28..48]);
         if hash != self.info_hash {
-            panic!("peer: handshake received is for wrong info hash"); //FIXME: disconnect instead of panic
+            println!("peer: invalid info hash in handshake");
+            self.disconnect();
+            return;
         }
         self.is_handshake_received = true;
         self.send_bitfield();
@@ -440,7 +454,7 @@ impl Peer {
         self.is_piece_downloaded[piece] = true;
     }
 
-    pub fn recv_piece(&mut self, message: &Vec<u8>) {
+    fn recv_piece(&mut self, message: &Vec<u8>) {
         println!("peer: recv_piece from {}", self);
 
         let index = byte_slice_to_u32(&message[5..9]) as usize;
