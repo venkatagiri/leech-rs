@@ -159,7 +159,7 @@ impl Client {
                         continue;
                     }
 
-                    if seeder.no_of_blocks_requested() > 0 {
+                    if seeder.no_of_blocks_requested() > 5 { // FIXME: make this configurable
                         continue;
                     }
 
