@@ -41,7 +41,7 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    pub fn new(file: &str) -> Result<Torrent, BEncodingParseError> {
+    pub fn new(file: &str) -> Result<Torrent, Error> {
         let root = BEncoding::decode_file(&file).unwrap();
         println!("torrent: contents {}", root);
         let info = try!(root.get_dict("info"));

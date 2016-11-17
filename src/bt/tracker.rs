@@ -1,7 +1,4 @@
-use std::io::{
-    Read,
-    Result,
-};
+use std::io::Read;
 use std::fmt;
 use std::string::String;
 use std::str::FromStr;
@@ -17,6 +14,7 @@ use std::time::Duration;
 use hyper::client::Client;
 use bt::bencoding::*;
 use bt::utils::*;
+use bt::error::Result;
 
 fn parse_peers(peers: &[u8]) -> Vec<SocketAddr> {
     peers.chunks(6).filter_map(|peer| {
@@ -42,11 +40,11 @@ impl HTTPTracker {
                     hash = info_hash.url_encoded(),
                     peer_id = MY_PEER_ID.url_encoded());
         let mut buf = vec![];
-        let mut response = client.get(&url).send().expect("http request error");
-        response.read_to_end(&mut buf).expect("http response read error");
+        let mut response = try!(client.get(&url).send());
+        try!(response.read_to_end(&mut buf));
 
-        let root = BEncoding::decode(buf).expect("http response parse error");
-        let peers = root.get_bytes("peers").expect("peers key not found");
+        let root = try!(BEncoding::decode(buf).ok_or(Error::DecodeError));
+        let peers = try!(root.get_bytes("peers"));
         Ok(parse_peers(&peers))
     }
 }
@@ -87,7 +85,8 @@ impl UDPTracker {
         buffer.extend_from_slice(&action);
         buffer.extend_from_slice(&transaction_id);
 
-        socket.send(&buffer)
+        let len = try!(socket.send(&buffer));
+        Ok(len)
     }
 
     fn recv_connect(socket: &mut UdpSocket) -> Result<u64> {
@@ -119,7 +118,8 @@ impl UDPTracker {
         buffer.extend_from_slice(&[0; 4]); // num want
         buffer.extend_from_slice(&[0; 4]); // port
 
-        socket.send(&buffer)
+        let len = try!(socket.send(&buffer));
+        Ok(len)
     }
 
     fn recv_announce(socket: &mut UdpSocket) -> Result<Vec<SocketAddr>> {
@@ -159,7 +159,7 @@ impl Tracker {
                     continue;
                 },
                 Err(err) => {
-                    println!("tracker: error while requesting url({}): {}", url, err);
+                    println!("tracker: error while requesting url({}): {:?}", url, err);
                     continue;
                 }
             };

@@ -9,22 +9,24 @@ use std::collections::BTreeMap;
 use std::cmp::PartialEq;
 
 #[derive(Debug)]
-pub enum BEncodingParseError {
+pub enum Error {
     NotADict,
     NotAList,
     NotAInt,
     NotAStr,
-    MissingKey(String)
+    MissingKey(String),
+    DecodeError,
 }
 
-impl fmt::Display for BEncodingParseError {
+impl fmt::Display for Error {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
         match *self {
-            BEncodingParseError::NotADict => try!(write!(f, "not a dict!")),
-            BEncodingParseError::NotAList => try!(write!(f, "not a list!")),
-            BEncodingParseError::NotAInt => try!(write!(f, "not an int!")),
-            BEncodingParseError::NotAStr => try!(write!(f, "not a str!")),
-            BEncodingParseError::MissingKey(ref val) => try!(write!(f, "missing key `{}`", val)),
+            Error::NotADict => try!(write!(f, "not a dict!")),
+            Error::NotAList => try!(write!(f, "not a list!")),
+            Error::NotAInt => try!(write!(f, "not an int!")),
+            Error::NotAStr => try!(write!(f, "not a str!")),
+            Error::MissingKey(ref val) => try!(write!(f, "missing key `{}`", val)),
+            Error::DecodeError => try!(write!(f, "decode failed!")),
         }
         Ok(())
     }
@@ -54,67 +56,67 @@ impl BEncoding {
         encode_next_type(val)
     }
 
-    fn to_int(&self) -> Result<i64, BEncodingParseError> {
+    fn to_int(&self) -> Result<i64, Error> {
         match *self {
             BEncoding::Int(val) => Ok(val),
-            _ => Err(BEncodingParseError::NotAInt),
+            _ => Err(Error::NotAInt),
         }
     }
 
-    fn to_dict(&self) -> Result<&BTreeMap<String, BEncoding>, BEncodingParseError> {
+    fn to_dict(&self) -> Result<&BTreeMap<String, BEncoding>, Error> {
         match *self {
             BEncoding::Dict(ref map) => Ok(map),
-            _ => Err(BEncodingParseError::NotADict),
+            _ => Err(Error::NotADict),
         }
     }
 
-    pub fn to_list(&self) -> Result<&Vec<BEncoding>, BEncodingParseError> {
+    pub fn to_list(&self) -> Result<&Vec<BEncoding>, Error> {
         match *self {
             BEncoding::List(ref list) => Ok(list),
-            _ => Err(BEncodingParseError::NotAList),
+            _ => Err(Error::NotAList),
         }
     }
 
-    pub fn to_str(&self) -> Result<String, BEncodingParseError> {
+    pub fn to_str(&self) -> Result<String, Error> {
         match *self {
             BEncoding::Str(ref val) => Ok(str::from_utf8(val).unwrap().to_string()),
-            _ => Err(BEncodingParseError::NotAStr),
+            _ => Err(Error::NotAStr),
         }
     }
 
-    fn to_bytes(&self) -> Result<Vec<u8>, BEncodingParseError> {
+    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         match *self {
             BEncoding::Str(ref val) => Ok(val.clone()),
-            _ => Err(BEncodingParseError::NotAStr),
+            _ => Err(Error::NotAStr),
         }
     }
 
-    pub fn get_dict(&self, key: &str) -> Result<&BEncoding, BEncodingParseError> {
+    pub fn get_dict(&self, key: &str) -> Result<&BEncoding, Error> {
         let map = try!(self.to_dict());
-        map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string()))
+        map.get(key).ok_or(Error::MissingKey(key.to_string()))
     }
 
-    fn get_value(&self, key: &str) -> Result<&BEncoding, BEncodingParseError> {
+    fn get_value(&self, key: &str) -> Result<&BEncoding, Error> {
         let map = try!(self.to_dict());
-        map.get(key).ok_or(BEncodingParseError::MissingKey(key.to_string()))
+        map.get(key).ok_or(Error::MissingKey(key.to_string()))
     }
 
-    pub fn get_int(&self, key: &str) -> Result<i64, BEncodingParseError> {
+    pub fn get_int(&self, key: &str) -> Result<i64, Error> {
         let value = try!(self.get_value(key));
         value.to_int()
     }
 
-    pub fn get_str(&self, key: &str) -> Result<String, BEncodingParseError> {
+    pub fn get_str(&self, key: &str) -> Result<String, Error> {
         let value = try!(self.get_value(key));
         value.to_str()
     }
 
-    pub fn get_bytes(&self, key: &str) -> Result<Vec<u8>, BEncodingParseError> {
+    pub fn get_bytes(&self, key: &str) -> Result<Vec<u8>, Error> {
         let value = try!(self.get_value(key));
         value.to_bytes()
     }
 
-    pub fn get_list(&self, key: &str) -> Result<&Vec<BEncoding>, BEncodingParseError> {
+    pub fn get_list(&self, key: &str) -> Result<&Vec<BEncoding>, Error> {
         let value = try!(self.get_value(key));
         value.to_list()
     }
