@@ -162,9 +162,13 @@ impl Handler for PeerHandler {
                 self.add_stream(event_loop, addr.clone(), socket);
             },
             Actions::SendData(addr, data) => {
+                if self.addr_to_token.contains_key(&addr) {
+                    return;
+                }
                 let token = self.addr_to_token.get(&addr).unwrap();
-                let socket = self.streams.get_mut(&token).unwrap();
-                let _ = socket.write(&data).unwrap();
+                if let Some(socket) = self.streams.get_mut(&token) {
+                    let _ = socket.write(&data).unwrap();
+                };
             },
             Actions::Disconnect(addr) => {
                 if !self.addr_to_token.contains_key(&addr) {
