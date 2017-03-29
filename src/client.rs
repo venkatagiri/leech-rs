@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use mio::*;
 use mio::tcp::*;
-use bt::torrent::*;
-use bt::tracker::*;
-use bt::peer::*;
-use bt::utils::*;
+
+use torrent::*;
+use tracker::*;
+use peer::*;
+use utils::*;
 
 pub struct Client {
     torrent: Torrent,

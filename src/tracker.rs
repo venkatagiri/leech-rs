@@ -10,11 +10,11 @@ use std::net::{
 };
 use std::mem;
 use std::time::Duration;
-
 use hyper::client::Client;
-use bt::bencoding::*;
-use bt::utils::*;
-use bt::error::Result;
+
+use bencoding::*;
+use utils::*;
+use error::Result;
 
 fn parse_peers(peers: &[u8]) -> Vec<SocketAddr> {
     peers.chunks(6).filter_map(|peer| {

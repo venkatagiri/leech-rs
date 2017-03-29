@@ -10,8 +10,8 @@ use std::time::Instant;
 use mio::*;
 use mio::tcp::*;
 
-use bt::utils::*;
-use bt::torrent::*;
+use utils::*;
+use torrent::*;
 
 // BitTorrent message types
 #[derive(Debug)]

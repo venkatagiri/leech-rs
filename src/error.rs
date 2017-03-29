@@ -2,7 +2,8 @@ use std::result;
 use std::net;
 use std::io;
 use hyper;
-use bt::bencoding;
+
+use bencoding;
 
 #[derive(Debug)]
 pub enum Error {

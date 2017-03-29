@@ -1,10 +1,5 @@
-extern crate hyper;
-extern crate rustc_serialize;
-extern crate mio;
-extern crate sha1;
-
-mod bt;
-use bt::client::Client;
+extern crate leechrs;
+use leechrs::client::Client;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

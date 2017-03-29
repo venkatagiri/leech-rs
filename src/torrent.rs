@@ -11,10 +11,10 @@ use std::io::{
     Read
 };
 
-use bt::bencoding::*;
-use bt::tracker::*;
-use bt::utils::*;
-use bt::peer::Peer;
+use bencoding::*;
+use tracker::*;
+use utils::*;
+use peer::Peer;
 
 /// Files in a Torrent
 #[derive(Clone)]
