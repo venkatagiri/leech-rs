@@ -79,6 +79,7 @@ impl Torrent {
 
         // Parse files list from the info
         let mut file_items = vec![];
+        let dl_path = PathBuf::from("/tmp"); // FIXME: change this to download directory
         if let Ok(files) = info.get_list("files") {
             // Multiple File Mode
             let dir = name.clone();
@@ -86,7 +87,7 @@ impl Torrent {
             for file in files {
                 let len = try!(file.get_int("length")) as usize;
                 let path = try!(file.get_list("path"));
-                let mut file_path = PathBuf::from("."); // FIXME: change this to download directory
+                let mut file_path = dl_path.clone();
                 file_path.push(dir.clone());
                 for part in path {
                     let p = part.to_str().unwrap();
@@ -103,7 +104,7 @@ impl Torrent {
             // Single File Mode
             let file_length = try!(info.get_int("length")) as usize;
             let file_name = name.clone();
-            let mut file_path = PathBuf::from(".");
+            let mut file_path = dl_path.clone();
             file_path.push(file_name);
             file_items.push(FileItem {
                 path: file_path.to_str().unwrap().into(),
