@@ -28,7 +28,7 @@ impl Client {
         let event_loop_channel = self.spawn_event_loop(tx);
         {
             let event_loop_channel = event_loop_channel.clone();
-            let tracker = { self.torrent.tracker.clone() };
+            let tracker = self.torrent.tracker.clone();
             self.spawn_tracker_update(event_loop_channel, tracker);
         }
 
