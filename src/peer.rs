@@ -176,6 +176,7 @@ impl PeerHandler {
         let addr = self.find_connection(token).addr;
         event_loop.deregister(&self.find_connection(token).socket).unwrap();
         self.conns.remove(token);
+        self.addr_to_token.remove(&addr);
         self.data_channel.send(Message::Disconnect(addr)).unwrap();
     }
 
