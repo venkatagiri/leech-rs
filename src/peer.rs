@@ -33,8 +33,8 @@ pub enum MessageType {
 }
 
 #[allow(unused_comparisons)]
-impl MessageType {
-    fn from_u8(id: u8) -> MessageType {
+impl From<u8> for MessageType {
+    fn from(id: u8) -> Self {
         if 0 <= id && id <= 9 {
             unsafe { mem::transmute(id) }
         } else {
@@ -290,7 +290,7 @@ impl Peer {
         } else if message.len() == 4 {
             MessageType::KeepAlive
         } else {
-            MessageType::from_u8(message[4])
+            MessageType::from(message[4])
         }
     }
 
