@@ -44,9 +44,9 @@ impl MessageType {
 }
 
 // Notification types for the PeerHandler
-pub enum Actions {
+pub enum Message {
     AddPeer(SocketAddr),
-    SendData(SocketAddr, Vec<u8>),
+    Data(SocketAddr, Vec<u8>),
     Disconnect(SocketAddr),
 }
 
@@ -58,11 +58,11 @@ pub struct PeerHandler {
     streams: HashMap<Token, TcpStream>,
     addr_to_token: HashMap<SocketAddr, Token>,
     token_counter: usize,
-    data_channel: mpsc::Sender<(SocketAddr, Vec<u8>)>,
+    data_channel: mpsc::Sender<Message>,
 }
 
 impl PeerHandler {
-    pub fn new(socket: TcpListener, chn: mpsc::Sender<(SocketAddr, Vec<u8>)>) -> PeerHandler {
+    pub fn new(socket: TcpListener, chn: mpsc::Sender<Message>) -> PeerHandler {
         PeerHandler {
             socket: socket,
             streams: HashMap::new(),
@@ -81,41 +81,44 @@ impl PeerHandler {
         println!("peer_handler: new stream registered with addr({}) token({})", addr, new_token.0);
     }
 
-    fn read(&mut self, token: &Token) -> io::Result<bool> {
+    fn read(&mut self, token: &Token) -> io::Result<()> {
         let mut data = vec![];
         let mut buffer = [0; 2048];
         let socket = self.streams.get_mut(&token).unwrap();
         loop {
-            match socket.try_read(&mut buffer) {
-                Err(err) => return Err(err),
-                Ok(None) => {
+            match socket.try_read(&mut buffer)? {
+                None => {
                     // socket buffer has got no more bytes
                     break;
                 },
-                Ok(Some(len)) if len <= 0 => {
+                Some(len) if len <= 0 => {
                     // socket buffer has got no more bytes
+                    println!("peer_handler: read {} bytes for token({})", len, token.0);
                     break;
                 },
-                Ok(Some(len)) if len > 0 => {
+                Some(len) if len > 0 => {
+                    println!("peer_handler: read {} bytes for token({})", len, token.0);
                     data.extend_from_slice(&buffer[0..len]);
                 }
-                Ok(Some(_)) => unreachable!(),
+                Some(_) => unreachable!(),
             }
         }
         let addr = try!(socket.peer_addr());
-        self.data_channel.send((addr, data)).unwrap();
-        Ok(true)
+        self.data_channel.send(Message::Data(addr, data)).unwrap();
+        Ok(())
     }
 
     fn disconnect(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: &Token) {
+        let addr = self.streams[token].peer_addr().unwrap();
         event_loop.deregister(&self.streams[token]).unwrap();
-        self.streams.remove(token);  // FIXME: send disconnect back to torrent
+        self.streams.remove(token);
+        self.data_channel.send(Message::Disconnect(addr)).unwrap();
     }
 }
 
 impl Handler for PeerHandler {
     type Timeout = Token;
-    type Message = Actions;
+    type Message = Message;
 
     fn ready(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token, events: EventSet) {
         if events.is_readable() {
@@ -133,6 +136,7 @@ impl Handler for PeerHandler {
                     self.add_stream(event_loop, addr, peer_socket);
                 }
                 token => {
+                    println!("peer_handler: read token({})", token.0);
                     match self.read(&token) {
                         Ok(_) => {},
                         Err(err) => {
@@ -148,20 +152,20 @@ impl Handler for PeerHandler {
         if events.is_writable() {
             let socket = self.streams.get_mut(&token).unwrap();
             let addr = socket.peer_addr().unwrap();
-            self.data_channel.send((addr, vec![])).unwrap();
+            self.data_channel.send(Message::AddPeer(addr)).unwrap();
         }
     }
 
     fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
         match msg {
-            Actions::AddPeer(addr) => {
+            Message::AddPeer(addr) => {
                 if self.addr_to_token.contains_key(&addr) {
                     return;
                 }
                 let socket = TcpStream::connect(&addr).unwrap();
                 self.add_stream(event_loop, addr.clone(), socket);
             },
-            Actions::SendData(addr, data) => {
+            Message::Data(addr, data) => {
                 if self.addr_to_token.contains_key(&addr) {
                     return;
                 }
@@ -170,7 +174,7 @@ impl Handler for PeerHandler {
                     let _ = socket.write(&data).unwrap();
                 };
             },
-            Actions::Disconnect(addr) => {
+            Message::Disconnect(addr) => {
                 if !self.addr_to_token.contains_key(&addr) {
                     return;
                 }
@@ -186,7 +190,7 @@ impl Handler for PeerHandler {
 pub struct Peer {
     addr: SocketAddr,
     info_hash: Hash,
-    channel: Sender<Actions>,
+    channel: Sender<Message>,
     tpieces: mpsc::Sender<(usize, usize, Vec<u8>)>,
 
     data: Vec<u8>,
@@ -203,7 +207,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(addr: SocketAddr, torrent: &Torrent, chn: Sender<Actions>, t: mpsc::Sender<(usize, usize, Vec<u8>)>) -> Peer {
+    pub fn new(addr: SocketAddr, torrent: &Torrent, chn: Sender<Message>, t: mpsc::Sender<(usize, usize, Vec<u8>)>) -> Peer {
         let mut p = Peer {
             addr: addr,
             info_hash: torrent.info_hash.clone(),
@@ -232,11 +236,11 @@ impl Peer {
     }
 
     fn write(&self, data: Vec<u8>) {
-        self.channel.send(Actions::SendData(self.addr, data)).unwrap();
+        self.channel.send(Message::Data(self.addr, data)).unwrap();
     }
 
     fn disconnect(&self) {
-        self.channel.send(Actions::Disconnect(self.addr)).unwrap();
+        self.channel.send(Message::Disconnect(self.addr)).unwrap();
     }
 
     pub fn process_data(&mut self) {
@@ -408,7 +412,7 @@ impl Peer {
         }
         let hash = Hash::from_slice(&message[28..48]);
         if hash != self.info_hash {
-            println!("peer: invalid info hash in handshake");
+            println!("peer: invalid info hash in handshake. expected({}) received({})", self.info_hash, hash);
             self.disconnect();
             return;
         }

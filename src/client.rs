@@ -35,14 +35,20 @@ impl Client {
         loop {
             // Push data packets received from event loop to each Peer
             while let Ok(packet) = rx.try_recv() {
-                let (addr, data) = packet;
-                if !self.torrent.peers.contains_key(&addr) {
-                    let event_loop_channel = event_loop_channel.clone();
-                    let tpieces = tpieces.clone();
-                    let peer = Peer::new(addr, &self.torrent, event_loop_channel, tpieces);
-                    self.torrent.peers.insert(addr, peer);
+                match packet {
+                    Message::AddPeer(addr) => {
+                        if !self.torrent.peers.contains_key(&addr) {
+                            let event_loop_channel = event_loop_channel.clone();
+                            let tpieces = tpieces.clone();
+                            let peer = Peer::new(addr, &self.torrent, event_loop_channel, tpieces);
+                            self.torrent.peers.insert(addr, peer);
+                        }
+                    }
+                    Message::Data(addr, data) => {
+                        self.torrent.peers.get_mut(&addr).unwrap().read(data);
+                    }
+                    Message::Disconnect(_addr) => {}
                 }
-                self.torrent.peers.get_mut(&addr).unwrap().read(data);
             }
 
             // Process Peers
@@ -61,14 +67,14 @@ impl Client {
         }
     }
 
-    fn spawn_event_loop(&self, sender: mpsc::Sender<(SocketAddr, Vec<u8>)>) -> Sender<Actions> {
+    fn spawn_event_loop(&self, sender: mpsc::Sender<Message>) -> Sender<Message> {
         println!("client: spawning event loop thread");
 
         let address = "0.0.0.0:56789".parse::<SocketAddr>().unwrap();
         let server_socket = TcpListener::bind(&address).unwrap();
 
         let mut event_loop = EventLoop::new().unwrap();
-        let event_loop_channel: Sender<Actions> = event_loop.channel();
+        let event_loop_channel: Sender<Message> = event_loop.channel();
         let mut handler = PeerHandler::new(server_socket, sender);
 
         event_loop.register(&handler.socket, SERVER_TOKEN, EventSet::readable(), PollOpt::edge()).unwrap();
@@ -78,7 +84,7 @@ impl Client {
         event_loop_channel
     }
 
-    fn spawn_tracker_update(&self, event_loop_channel: Sender<Actions>, tracker: Tracker) {
+    fn spawn_tracker_update(&self, event_loop_channel: Sender<Message>, tracker: Tracker) {
         println!("client: spawning tracker thread");
 
         thread::spawn(move || {
@@ -88,7 +94,7 @@ impl Client {
                     println!("torrent: no peers found!");
                 } else {
                     for peer in &peer_addresses {
-                        event_loop_channel.send(Actions::AddPeer(*peer)).unwrap();
+                        event_loop_channel.send(Message::AddPeer(*peer)).unwrap();
                     }
                 }
                 thread::sleep(Duration::from_secs(30 * 60)); // 30 mins
