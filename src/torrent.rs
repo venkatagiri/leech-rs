@@ -47,7 +47,8 @@ impl Torrent {
         let info = try!(root.get_dict("info"));
         let info_hash = {
             let data = BEncoding::encode(&info);
-            sha1(&data)
+            let hash = sha1(&data);
+            Hash::from_slice(&hash)
         };
 
         let info = try!(root.get_dict("info"));
@@ -111,14 +112,15 @@ impl Torrent {
             });
         }
 
+        println!("torrent: hash is {}", info_hash);
         for file in &file_items {
             println!("torrent: file is {}", file.path);
         }
 
         let mut t = Torrent {
             name: name,
-            info_hash: Hash::from_slice(&info_hash),
-            tracker: Tracker::new(tracker_list, Hash::from_slice(&info_hash)),
+            info_hash: info_hash.clone(),
+            tracker: Tracker::new(tracker_list, info_hash.clone()),
             piece_size: piece_size,
             pieces_hashes: hashes,
             files: file_items,
