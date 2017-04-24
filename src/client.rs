@@ -1,10 +1,9 @@
-use std::sync::mpsc;
+use std::sync::mpsc::{channel, Sender};
 use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
 
-use mio::*;
-use mio::tcp::*;
+use mio::net::*;
 
 use torrent::*;
 use tracker::*;
@@ -23,8 +22,8 @@ impl Client {
     }
 
     pub fn start(&mut self) {
-        let (tx, rx) = mpsc::channel();
-        let (tpieces, rpieces) = mpsc::channel();
+        let (tx, rx) = channel();
+        let (tpieces, rpieces) = channel();
         let event_loop_channel = self.spawn_event_loop(tx);
         {
             let event_loop_channel = event_loop_channel.clone();
@@ -67,21 +66,18 @@ impl Client {
         }
     }
 
-    fn spawn_event_loop(&self, sender: mpsc::Sender<Message>) -> Sender<Message> {
+    fn spawn_event_loop(&self, sender: Sender<Message>) -> Sender<Message> {
         println!("client: spawning event loop thread");
 
-        let address = "0.0.0.0:56789".parse::<SocketAddr>().unwrap();
-        let server_socket = TcpListener::bind(&address).unwrap();
-
-        let mut event_loop = EventLoop::new().unwrap();
-        let event_loop_channel: Sender<Message> = event_loop.channel();
-        let mut handler = PeerHandler::new(server_socket, sender);
-
-        handler.register(&mut event_loop).unwrap();
+        let (tx, rx) = channel();
         thread::spawn(move || {
-            event_loop.run(&mut handler).unwrap();
+            let address = "0.0.0.0:56789".parse::<SocketAddr>().unwrap();
+            let socket = TcpListener::bind(&address).unwrap();
+
+            let mut handler = Handler::new(socket, sender, rx);
+            handler.run();
         });
-        event_loop_channel
+        tx
     }
 
     fn spawn_tracker_update(&self, event_loop_channel: Sender<Message>, tracker: Tracker) {

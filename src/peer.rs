@@ -1,14 +1,15 @@
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::fmt;
 use std::mem;
 use std::collections::HashMap;
-use std::sync::mpsc;
-use std::time::Instant;
+use std::sync::mpsc::{Sender, Receiver};
+use std::time::{Duration, Instant};
 
 use mio::*;
-use mio::tcp::*;
-use mio::util::Slab;
+use mio::net::*;
+use mio::unix::UnixReady;
+use slab::Slab;
 
 use utils::*;
 use torrent::*;
@@ -43,7 +44,7 @@ impl From<u8> for MessageType {
     }
 }
 
-// Notification types for the PeerHandler
+// Notification types for the Handler
 pub enum Message {
     AddPeer(SocketAddr),
     Data(SocketAddr, Vec<u8>),
@@ -72,8 +73,8 @@ impl Connection {
         self.send_queue.push(data);
     }
 
-    fn register(&mut self, event_loop: &mut EventLoop<PeerHandler>) -> io::Result<()> {
-        event_loop.register(&self.socket, self.token, EventSet::readable() | EventSet::writable(), PollOpt::edge())
+    fn register(&mut self, poll: &mut Poll) -> io::Result<()> {
+        poll.register(&self.socket, self.token, Ready::readable() | Ready::writable(), PollOpt::edge())
     }
 
     fn writable(&mut self) -> io::Result<()> {
@@ -84,18 +85,19 @@ impl Connection {
         self.send_queue.pop()
             .ok_or(io::Error::new(io::ErrorKind::Other, "Could not pop send queue"))
             .and_then(|data| {
-                match self.socket.try_write(&data) {
-                    Ok(None) => {
+                match self.socket.write(&data) {
+                    Ok(len) => {
+                        println!("connection: wrote {} bytes", len);
+                        Ok(())
+                    }
+                    Err(ref err) if io::ErrorKind::WouldBlock == err.kind() => {
                         println!("connection: write WouldBlock");
                         self.send_queue.push(data);
                         Ok(())
                     }
-                    Ok(Some(_)) => {
-                        Ok(())
-                    }
-                    Err(e) => {
+                    Err(err) => {
                         println!("connection: failed to write!");
-                        Err(e)
+                        Err(err)
                     }
                 }
             })
@@ -106,24 +108,21 @@ impl Connection {
         let mut data = vec![];
         let mut buffer = [0; 2048];
         loop {
-            match self.socket.try_read(&mut buffer) {
-                Err(e) => {
-                    return Err(e);
-                }
-                Ok(None) => {
-                    // socket buffer has got no more bytes
-                    break;
-                },
-                Ok(Some(len)) if len <= 0 => { // FIXME: infinite loop if this isn't handled
+            match self.socket.read(&mut buffer) {
+                Ok(len) if len == 0 => {
                     println!("connection: read {} bytes for {:?}", len, self.token);
                     break;
                 }
-                Ok(Some(len)) if len > 0 => {
+                Ok(len) => {
                     println!("connection: read {} bytes for {:?}", len, self.token);
                     data.extend_from_slice(&buffer[0..len]);
                 }
-                Ok(Some(_)) => {
-                    unreachable!()
+                Err(ref err) if io::ErrorKind::WouldBlock == err.kind() => {
+                    break;
+                }
+                Err(err) => {
+                    println!("connection: failed to write!");
+                    return Err(err);
                 }
             }
         }
@@ -132,94 +131,109 @@ impl Connection {
 }
 
 // Handler for the event loop
-pub struct PeerHandler {
+pub struct Handler {
     token: Token,
     pub socket: TcpListener,
-    conns: Slab<Connection>,
+    conns: Slab<Connection, Token>,
     addr_to_token: HashMap<SocketAddr, Token>,
-    data_channel: mpsc::Sender<Message>,
+    data_channel: Sender<Message>,
+    notifications: Receiver<Message>,
 }
 
 
-impl PeerHandler {
-    pub fn new(socket: TcpListener, chn: mpsc::Sender<Message>) -> PeerHandler {
-        PeerHandler {
+impl Handler {
+    pub fn new(socket: TcpListener, chn: Sender<Message>, notifications: Receiver<Message>) -> Handler {
+        Handler {
             socket: socket,
-            token: Token(0),
-            conns: Slab::new_starting_at(Token(1), 1024),
+            token: Token(1025),
+            conns: Slab::with_capacity(1024),
             addr_to_token: HashMap::new(),
             data_channel: chn,
+            notifications: notifications,
         }
-    }
-
-    pub fn register(&mut self, event_loop: &mut EventLoop<Self>) -> io::Result<()> {
-        event_loop.register(&self.socket, self.token, EventSet::readable(), PollOpt::edge())
-    }
-
-    fn add_conn(&mut self, event_loop: &mut EventLoop<Self>, addr: SocketAddr, stream: TcpStream) {
-        match self.conns.insert_with(|token| {
-            Connection::new(stream, addr, token)
-        }) {
-            Some(token) => {
-                self.find_connection(token).register(event_loop).unwrap();
-                self.addr_to_token.insert(addr, token);
-                self.data_channel.send(Message::AddPeer(addr)).unwrap();
-                println!("peer_handler: new stream registered with addr({}) {:?}", addr, token);
-            }
-            None => {
-                println!("peer_handler: failed to add conn to slab");
-            }
-        }
-    }
-
-    fn disconnect(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token) {
-        let addr = self.find_connection(token).addr;
-        event_loop.deregister(&self.find_connection(token).socket).unwrap();
-        self.conns.remove(token);
-        self.addr_to_token.remove(&addr);
-        self.data_channel.send(Message::Disconnect(addr)).unwrap();
     }
 
     fn find_connection<'a>(&'a mut self, token: Token) -> &'a mut Connection {
         &mut self.conns[token]
     }
-}
 
-impl Handler for PeerHandler {
-    type Timeout = Token;
-    type Message = Message;
+    fn add_conn(&mut self, mut poll: &mut Poll, addr: SocketAddr, stream: TcpStream) {
+        match self.conns.insert(Connection::new(stream, addr, Token(1234))) {
+            Ok(token) => {
+                self.find_connection(token).token = token;
+                self.find_connection(token).register(&mut poll).unwrap();
+                self.addr_to_token.insert(addr, token);
+                self.data_channel.send(Message::AddPeer(addr)).unwrap();
+                println!("peer_handler: new peer created with {:?} {:?}", addr, token);
+            }
+            Err(_err) => {
+                println!("peer_handler: failed to add conn to slab");
+            }
+        }
+    }
 
-    fn ready(&mut self, event_loop: &mut EventLoop<PeerHandler>, token: Token, events: EventSet) {
-        println!("peer_handler: {:?} events {:?}", token, events);
+    fn disconnect(&mut self, poll: &mut Poll, token: Token) {
+        let addr = self.find_connection(token).addr;
+        poll.deregister(&self.find_connection(token).socket).unwrap();
+        self.conns.remove(token);
+        self.addr_to_token.remove(&addr);
+        self.data_channel.send(Message::Disconnect(addr)).unwrap();
+    }
 
-        if events.is_error() {
+    fn register(&mut self, poll:&mut Poll) {
+        poll.register(&self.socket, self.token, Ready::readable(), PollOpt::edge()).unwrap();
+    }
+
+    pub fn run(&mut self) {
+        let mut poll = Poll::new().unwrap();
+        self.register(&mut poll);
+
+        let mut events = Events::with_capacity(1024);
+        loop {
+            poll.poll(&mut events, Some(Duration::from_millis(500))).unwrap();
+
+            for event in events.iter() {
+                self.handle(&mut poll, event);
+            }
+
+            while let Ok(msg) = self.notifications.try_recv() {
+                self.notify(&mut poll, msg);
+            }
+        }
+    }
+
+    fn handle(&mut self, mut poll: &mut Poll, event: Event) {
+        println!("peer_handler: {:?} readiness {:?}", event.token(), event.readiness());
+        let token = event.token();
+        let ready = UnixReady::from(event.readiness());
+
+        if ready.is_error() {
             println!("error: peer_handler: Error event for {:?}", token);
-            self.disconnect(event_loop, token);
+            self.disconnect(&mut poll, token);
             return;
         }
 
-        if events.is_hup() {
+        if ready.is_hup() {
             println!("error: peer_handler: Hup event for {:?}", token);
-            self.disconnect(event_loop, token);
+            self.disconnect(&mut poll, token);
             return;
         }
 
-        if events.is_writable() {
+        if ready.is_writable() {
             self.find_connection(token).writable().unwrap();
         }
 
-        if events.is_readable() {
+        if ready.is_readable() {
             if token == self.token {
                 println!("peer_handler: accepting a new connection");
                 let (peer_socket, addr) = match self.socket.accept() {
-                    Ok(Some((sock, addr))) => (sock, addr),
-                    Ok(None) => unreachable!(),
+                    Ok((sock, addr)) => (sock, addr),
                     Err(e) => {
                         println!("peer_server: accept error {}", e);
                         return;
                     }
                 };
-                self.add_conn(event_loop, addr, peer_socket);
+                self.add_conn(&mut poll, addr, peer_socket);
             } else {
                 match self.find_connection(token).readable() {
                     Ok((addr, data)) => {
@@ -227,7 +241,7 @@ impl Handler for PeerHandler {
                     },
                     Err(err) => {
                         println!("peer_handler: error while reading {:?} {}", token, err);
-                        self.disconnect(event_loop, token);
+                        self.disconnect(poll, token);
                         return;
                     },
                 }
@@ -235,14 +249,14 @@ impl Handler for PeerHandler {
         }
     }
 
-    fn notify(&mut self, event_loop: &mut EventLoop<Self>, msg: Self::Message) {
+    fn notify(&mut self, mut poll: &mut Poll, msg: Message) {
         match msg {
             Message::AddPeer(addr) => {
                 if self.addr_to_token.contains_key(&addr) {
                     return;
                 }
                 let socket = TcpStream::connect(&addr).unwrap();
-                self.add_conn(event_loop, addr.clone(), socket);
+                self.add_conn(&mut poll, addr.clone(), socket);
             },
             Message::Data(addr, data) => {
                 if !self.addr_to_token.contains_key(&addr) {
@@ -256,7 +270,7 @@ impl Handler for PeerHandler {
                     return;
                 }
                 let token = self.addr_to_token.get(&addr).unwrap().clone();
-                self.disconnect(event_loop, token);
+                self.disconnect(&mut poll, token);
             },
         }
     }
@@ -268,7 +282,7 @@ pub struct Peer {
     addr: SocketAddr,
     info_hash: Hash,
     channel: Sender<Message>,
-    tpieces: mpsc::Sender<(usize, usize, Vec<u8>)>,
+    tpieces: Sender<(usize, usize, Vec<u8>)>,
 
     data: Vec<u8>,
     last_active: Instant,
@@ -284,7 +298,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(addr: SocketAddr, torrent: &Torrent, chn: Sender<Message>, t: mpsc::Sender<(usize, usize, Vec<u8>)>) -> Peer {
+    pub fn new(addr: SocketAddr, torrent: &Torrent, chn: Sender<Message>, t: Sender<(usize, usize, Vec<u8>)>) -> Peer {
         let mut p = Peer {
             addr: addr,
             info_hash: torrent.info_hash.clone(),
