@@ -1,15 +1,11 @@
 use std::io::{self, Read, Write};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::fmt;
 use std::mem;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{Sender, Receiver};
 use std::time::{Duration, Instant};
-
-use mio::*;
-use mio::net::*;
-use mio::unix::UnixReady;
-use slab::Slab;
+use std::thread;
 
 use utils::*;
 use torrent::*;
@@ -53,68 +49,54 @@ pub enum Message {
 
 // Peer Connection
 struct Connection {
-    socket: TcpStream,
     addr: SocketAddr,
-    token: Token,
-    send_queue: Vec<Vec<u8>>,
+    socket: TcpStream,
+    send_queue: VecDeque<Vec<u8>>,
 }
 
 impl Connection {
-    fn new(socket: TcpStream, addr: SocketAddr, token: Token) -> Connection {
+    fn new(addr: SocketAddr, socket: TcpStream) -> Connection {
         Connection {
-            socket: socket,
             addr: addr,
-            token: token,
-            send_queue: vec![],
+            socket: socket,
+            send_queue: VecDeque::new(),
         }
     }
 
     fn send_data(&mut self, data: Vec<u8>) {
-        self.send_queue.push(data);
-    }
-
-    fn register(&mut self, poll: &mut Poll) -> io::Result<()> {
-        poll.register(&self.socket, self.token, Ready::readable() | Ready::writable(), PollOpt::edge())
+        self.send_queue.push_front(data);
     }
 
     fn writable(&mut self) -> io::Result<()> {
-        println!("connection: writable token({:?}): q is {}", self.token, self.send_queue.len());
-        if self.send_queue.is_empty() {
-            return Ok(());
-        }
-        self.send_queue.pop()
-            .ok_or(io::Error::new(io::ErrorKind::Other, "Could not pop send queue"))
-            .and_then(|data| {
-                match self.socket.write(&data) {
-                    Ok(len) => {
-                        println!("connection: wrote {} bytes", len);
-                        Ok(())
-                    }
-                    Err(ref err) if io::ErrorKind::WouldBlock == err.kind() => {
-                        println!("connection: write WouldBlock");
-                        self.send_queue.push(data);
-                        Ok(())
-                    }
-                    Err(err) => {
-                        println!("connection: failed to write!");
-                        Err(err)
-                    }
+        while let Some(data) = self.send_queue.pop_back() {
+            match self.socket.write(&data) {
+                Ok(len) => {
+                    println!("connection: wrote {} bytes", len);
                 }
-            })
+                Err(ref err) if io::ErrorKind::WouldBlock == err.kind() => {
+                    self.send_queue.push_back(data);
+                    return Ok(());
+                }
+                Err(err) => {
+                    println!("connection: failed to write!");
+                    return Err(err);
+                }
+            }
+        }
+        Ok(())
     }
 
-    fn readable(&mut self) -> io::Result<(SocketAddr, Vec<u8>)> {
-        println!("connection: read {:?}", self.token);
+    fn readable(&mut self) -> io::Result<(Vec<u8>)> {
         let mut data = vec![];
         let mut buffer = [0; 2048];
+        self.socket.set_nonblocking(true)?;
         loop {
             match self.socket.read(&mut buffer) {
                 Ok(len) if len == 0 => {
-                    println!("connection: read {} bytes for {:?}", len, self.token);
                     break;
                 }
                 Ok(len) => {
-                    println!("connection: read {} bytes for {:?}", len, self.token);
+                    println!("connection: read {} bytes for {:?}", len, self.addr);
                     data.extend_from_slice(&buffer[0..len]);
                 }
                 Err(ref err) if io::ErrorKind::WouldBlock == err.kind() => {
@@ -126,16 +108,14 @@ impl Connection {
                 }
             }
         }
-        Ok((self.addr, data))
+        Ok(data)
     }
 }
 
 // Handler for the event loop
 pub struct Handler {
-    token: Token,
     pub socket: TcpListener,
-    conns: Slab<Connection, Token>,
-    addr_to_token: HashMap<SocketAddr, Token>,
+    conns: HashMap<SocketAddr, Connection>,
     data_channel: Sender<Message>,
     notifications: Receiver<Message>,
 }
@@ -145,132 +125,85 @@ impl Handler {
     pub fn new(socket: TcpListener, chn: Sender<Message>, notifications: Receiver<Message>) -> Handler {
         Handler {
             socket: socket,
-            token: Token(1025),
-            conns: Slab::with_capacity(1024),
-            addr_to_token: HashMap::new(),
+            conns: HashMap::new(),
             data_channel: chn,
             notifications: notifications,
         }
     }
 
-    fn find_connection<'a>(&'a mut self, token: Token) -> &'a mut Connection {
-        &mut self.conns[token]
+    fn add_conn(&mut self, addr: SocketAddr, stream: TcpStream) {
+        self.conns.insert(addr, Connection::new(addr, stream));
+        self.data_channel.send(Message::AddPeer(addr)).unwrap();
+        println!("handler: new peer created with {:?}", addr);
     }
 
-    fn add_conn(&mut self, mut poll: &mut Poll, addr: SocketAddr, stream: TcpStream) {
-        match self.conns.insert(Connection::new(stream, addr, Token(1234))) {
-            Ok(token) => {
-                self.find_connection(token).token = token;
-                self.find_connection(token).register(&mut poll).unwrap();
-                self.addr_to_token.insert(addr, token);
-                self.data_channel.send(Message::AddPeer(addr)).unwrap();
-                println!("peer_handler: new peer created with {:?} {:?}", addr, token);
-            }
-            Err(_err) => {
-                println!("peer_handler: failed to add conn to slab");
-            }
-        }
+    fn disconnect(&mut self, addr: &SocketAddr) {
+        self.conns.remove(addr);
+        self.data_channel.send(Message::Disconnect(*addr)).unwrap();
     }
 
-    fn disconnect(&mut self, poll: &mut Poll, token: Token) {
-        let addr = self.find_connection(token).addr;
-        poll.deregister(&self.find_connection(token).socket).unwrap();
-        self.conns.remove(token);
-        self.addr_to_token.remove(&addr);
-        self.data_channel.send(Message::Disconnect(addr)).unwrap();
-    }
-
-    fn register(&mut self, poll:&mut Poll) {
-        poll.register(&self.socket, self.token, Ready::readable(), PollOpt::edge()).unwrap();
-    }
-
-    pub fn run(&mut self) {
-        let mut poll = Poll::new().unwrap();
-        self.register(&mut poll);
-
-        let mut events = Events::with_capacity(1024);
+    pub fn run(&mut self) -> io::Result<()> {
+        self.socket.set_nonblocking(true)?;
         loop {
-            poll.poll(&mut events, Some(Duration::from_millis(500))).unwrap();
-
-            for event in events.iter() {
-                self.handle(&mut poll, event);
-            }
-
+            // process messages from client
             while let Ok(msg) = self.notifications.try_recv() {
-                self.notify(&mut poll, msg);
+                self.notify(msg);
             }
+
+            // accept new connections
+            while let Ok((sock, addr)) = self.socket.accept() {
+                sock.set_nonblocking(true)?;
+                self.add_conn(addr, sock);
+            }
+
+            // r/w for connections
+            let disconns = self.process_rw();
+            for addr in &disconns {
+                self.disconnect(addr);
+            }
+
+            thread::sleep(Duration::from_millis(1));
         }
     }
 
-    fn handle(&mut self, mut poll: &mut Poll, event: Event) {
-        println!("peer_handler: {:?} readiness {:?}", event.token(), event.readiness());
-        let token = event.token();
-        let ready = UnixReady::from(event.readiness());
-
-        if ready.is_error() {
-            println!("error: peer_handler: Error event for {:?}", token);
-            self.disconnect(&mut poll, token);
-            return;
-        }
-
-        if ready.is_hup() {
-            println!("error: peer_handler: Hup event for {:?}", token);
-            self.disconnect(&mut poll, token);
-            return;
-        }
-
-        if ready.is_writable() {
-            self.find_connection(token).writable().unwrap();
-        }
-
-        if ready.is_readable() {
-            if token == self.token {
-                println!("peer_handler: accepting a new connection");
-                let (peer_socket, addr) = match self.socket.accept() {
-                    Ok((sock, addr)) => (sock, addr),
-                    Err(e) => {
-                        println!("peer_server: accept error {}", e);
-                        return;
+    fn process_rw(&mut self) -> Vec<SocketAddr> {
+        let mut disconns = vec![];
+        for (addr, conn) in self.conns.iter_mut() {
+            match conn.readable() {
+                Ok(data) => {
+                    if !data.is_empty() {
+                        self.data_channel.send(Message::Data(*addr, data)).unwrap();
                     }
-                };
-                self.add_conn(&mut poll, addr, peer_socket);
-            } else {
-                match self.find_connection(token).readable() {
-                    Ok((addr, data)) => {
-                        self.data_channel.send(Message::Data(addr, data)).unwrap();
-                    },
-                    Err(err) => {
-                        println!("peer_handler: error while reading {:?} {}", token, err);
-                        self.disconnect(poll, token);
-                        return;
-                    },
-                }
+                },
+                Err(err) => {
+                    println!("handler: error while reading {:?} {}", addr, err);
+                    disconns.push(*addr);
+                    continue;
+                },
+            }
+            match conn.writable() {
+                Ok(_) => {},
+                Err(err) => {
+                    println!("handler: error while writing {:?} {}", addr, err);
+                    disconns.push(*addr);
+                    continue;
+                },
             }
         }
+        disconns
     }
 
-    fn notify(&mut self, mut poll: &mut Poll, msg: Message) {
+    fn notify(&mut self, msg: Message) {
         match msg {
             Message::AddPeer(addr) => {
-                if self.addr_to_token.contains_key(&addr) {
-                    return;
-                }
                 let socket = TcpStream::connect(&addr).unwrap();
-                self.add_conn(&mut poll, addr.clone(), socket);
+                self.add_conn(addr, socket);
             },
             Message::Data(addr, data) => {
-                if !self.addr_to_token.contains_key(&addr) {
-                    return;
-                }
-                let token = self.addr_to_token.get(&addr).unwrap().clone();
-                self.find_connection(token).send_data(data);
+                self.conns.get_mut(&addr).expect("missing connection").send_data(data);
             },
             Message::Disconnect(addr) => {
-                if !self.addr_to_token.contains_key(&addr) {
-                    return;
-                }
-                let token = self.addr_to_token.get(&addr).unwrap().clone();
-                self.disconnect(&mut poll, token);
+                self.disconnect(&addr);
             },
         }
     }

@@ -1,9 +1,7 @@
 use std::sync::mpsc::{channel, Sender};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener};
 use std::thread;
 use std::time::Duration;
-
-use mio::net::*;
 
 use torrent::*;
 use tracker::*;
@@ -75,7 +73,7 @@ impl Client {
             let socket = TcpListener::bind(&address).unwrap();
 
             let mut handler = Handler::new(socket, sender, rx);
-            handler.run();
+            handler.run().unwrap();
         });
         tx
     }

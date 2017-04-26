@@ -6,6 +6,4 @@ authors = ["reddy"]
 [dependencies]
 hyper = "~0.9"
 rustc-serialize = "0.3"
-mio = "0.6.6"
 sha1 = "0.2"
-slab     = "0.3.0"

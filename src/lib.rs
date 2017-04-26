@@ -1,8 +1,6 @@
 extern crate hyper;
 extern crate rustc_serialize;
-extern crate mio;
 extern crate sha1;
-extern crate slab;
 
 pub mod utils;
 pub mod magnet;
