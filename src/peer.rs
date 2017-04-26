@@ -118,6 +118,7 @@ pub struct Handler {
     conns: HashMap<SocketAddr, Connection>,
     data_channel: Sender<Message>,
     notifications: Receiver<Message>,
+    disconnects: Vec<SocketAddr>,
 }
 
 
@@ -128,6 +129,7 @@ impl Handler {
             conns: HashMap::new(),
             data_channel: chn,
             notifications: notifications,
+            disconnects: vec![],
         }
     }
 
@@ -157,8 +159,10 @@ impl Handler {
             }
 
             // r/w for connections
-            let disconns = self.process_rw();
-            for addr in &disconns {
+            self.process_rw();
+
+            // cleanup connections
+            while let Some(ref addr) = self.disconnects.pop() {
                 self.disconnect(addr);
             }
 
@@ -166,8 +170,7 @@ impl Handler {
         }
     }
 
-    fn process_rw(&mut self) -> Vec<SocketAddr> {
-        let mut disconns = vec![];
+    fn process_rw(&mut self) {
         for (addr, conn) in self.conns.iter_mut() {
             match conn.readable() {
                 Ok(data) => {
@@ -177,7 +180,7 @@ impl Handler {
                 },
                 Err(err) => {
                     println!("handler: error while reading {:?} {}", addr, err);
-                    disconns.push(*addr);
+                    self.disconnects.push(*addr);
                     continue;
                 },
             }
@@ -185,12 +188,11 @@ impl Handler {
                 Ok(_) => {},
                 Err(err) => {
                     println!("handler: error while writing {:?} {}", addr, err);
-                    disconns.push(*addr);
+                    self.disconnects.push(*addr);
                     continue;
                 },
             }
         }
-        disconns
     }
 
     fn notify(&mut self, msg: Message) {
