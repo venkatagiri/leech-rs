@@ -1,5 +1,5 @@
 [root]
-name = "leechrs"
+name = "leech"
 version = "0.2.9"
 dependencies = [
  "hyper 0.9.18 (registry+https://github.com/rust-lang/crates.io-index)",
